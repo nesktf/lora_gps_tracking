@@ -1,0 +1,6 @@
+[submodule "lib/arduino-LoRa"]
+	path = lib/arduino-LoRa
+	url = https://github.com/sandeepmistry/arduino-LoRa.git
+[submodule "lib/TinyGPSPlus"]
+	path = lib/TinyGPSPlus
+	url = https://github.com/mikalhart/TinyGPSPlus.git
