@@ -8,4 +8,6 @@ using the following:
 - SX1276 RFM95 LoRa transceivers
 
 # Diagram
-![diag](img/diag0.png) 
+![diag0](img/diag0.png) 
+
+![diag1](img/diag1.png)
