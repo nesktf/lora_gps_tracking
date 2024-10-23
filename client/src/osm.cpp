@@ -1,46 +1,4 @@
 #include "osm.hpp"
-#include "shogle/scene/camera.hpp"
-#include "shogle/scene/transform.hpp"
-
-#include <curlpp/cURLpp.hpp>
-#include <curlpp/Easy.hpp>
-#include <curlpp/Options.hpp>
-
-#include <shogle/core/log.hpp>
-#include <shogle/assets/texture.hpp>
-#include <shogle/render/gl/shader.hpp>
-
-#include <fstream>
-
-namespace {
-
-
-bool download_thing(std::string_view url, std::string_view path) {
-  try {
-    std::ofstream stream{path.data(), std::ios::out | std::ios::binary};
-    curlpp::Easy req;
-    req.setOpt(curlpp::Options::Url{url.data()});
-    req.setOpt(curlpp::Options::UserAgent{"Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0"});
-    req.setOpt(curlpp::Options::WriteStream{&stream});
-    req.setOpt(curlpp::Options::WriteFunction([&](const char* p, size_t sz, size_t nmemb) {
-      stream.write(p, sz*nmemb);
-      return sz*nmemb;
-    }));
-    req.perform();
-    return true;
-  } 
-  catch (curlpp::LogicError& e) {
-    std::cout << e.what() << std::endl;
-  }
-  catch (curlpp::RuntimeError& e) {
-    std::cout << e.what() << std::endl;
-  }
-  return false;
-
-}
-
-} // namespace
-
 
 namespace osm {
 
@@ -113,6 +71,8 @@ bool map::prepare_tiles() {
     .zfar(1.f)
     .pos(static_cast<ntf::vec2>(size())*.5f);
   _fbo = gl::framebuffer{size()};
+  _fbo.tex().set_filter(ntf::tex_filter::nearest);
+  _fbo.tex().set_wrap(ntf::tex_wrap::repeat);
 
   _transform = ntf::transform2d{}.scale(size());
   return true;
@@ -131,6 +91,57 @@ osm::map::map_object* map::add_object(gl::texture2d* tex, ntf::vec2 map_coords) 
     map_coords.x, map_coords.y
   )).scale(tex->dim()));
   return &_objects.back();
+}
+
+void map::update_object(map_object* obj, ntf::vec2 coords) {
+  obj->map_coords =coords;
+  obj->transform.pos(coord2pos(coords.x, coords.y));
+}
+
+bool download_thing(std::string_view url, std::string_view path) {
+  try {
+    std::ofstream stream{path.data(), std::ios::out | std::ios::binary};
+    curlpp::Easy req;
+    req.setOpt(curlpp::Options::Url{url.data()});
+    req.setOpt(curlpp::Options::UserAgent{"Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0"});
+    req.setOpt(curlpp::Options::WriteStream{&stream});
+    req.setOpt(curlpp::Options::WriteFunction([&](const char* p, size_t sz, size_t nmemb) {
+      stream.write(p, sz*nmemb);
+      return sz*nmemb;
+    }));
+    req.perform();
+    return true;
+  } 
+  catch (curlpp::LogicError& e) {
+    std::cout << e.what() << std::endl;
+  }
+  catch (curlpp::RuntimeError& e) {
+    std::cout << e.what() << std::endl;
+  }
+  return false;
+}
+
+bool download_string(std::string_view url, std::string& contents) {
+  std::string out;
+  try {
+    curlpp::Easy req;
+    req.setOpt(curlpp::Options::Url{url.data()});
+    req.setOpt(curlpp::Options::Timeout{1});
+    req.setOpt(curlpp::Options::WriteFunction{[&](const char* p, size_t sz, size_t nmemb) {
+      out.append(p, sz*nmemb);
+      return sz*nmemb;
+    }});
+    req.perform();
+    contents = std::move(out);
+    return true;
+  }
+  catch (curlpp::LogicError& e) {
+    std::cout << e.what() << std::endl;
+  }
+  catch (curlpp::RuntimeError& e) {
+    std::cout << e.what() << std::endl;
+  }
+  return false;
 }
 
 } // namespace osm
