@@ -18,6 +18,8 @@
 #define GPS_BAUD 9600
 #define SRL_BAUD 9600
 
+//#define GPS_DEBUG
+#define SERIAL_NOTIFY_UPDATE
 
 TinyGPSPlus gps{};
 SoftwareSerial gps_serial{GPS_TX, GPS_RX};
@@ -44,6 +46,7 @@ static void init_lora() {
 static void init_gps() {
   gps_serial.begin(GPS_BAUD);
   Serial.println("GPS: Initialized");
+  Serial.print("GPS: Trying to lock on satellite...");
 }
 
 void setup() {
@@ -55,15 +58,22 @@ void setup() {
 }
 
 
+static bool locked_on = false;
+
 static bool feed_the_beast(unsigned long ms) {
   bool new_data = false;
   unsigned long start = millis();
-  do { // Can NEVER rest, MUST ALWAYS POLL!!!
+  do {
     while (gps_serial.available() > 0) {
       uint8_t data = gps_serial.read();
-      // uncomment to see the gps string
-      // Serial.print(data); 
+#ifdef GPS_DEBUG
+      Serial.print(static_cast<char>(data));
+#endif
       if (gps.encode(data)) {
+        if (!locked_on && gps.location.isValid()) {
+          Serial.println("\nGPS: Satellite locked on!!!");
+          locked_on = true;
+        }
         new_data = true;
       }
     };
@@ -79,22 +89,36 @@ static void send_data(gps_data_t* data) {
   LoRa.beginPacket();
   LoRa.write(buffer, sz);
   LoRa.endPacket(true);
-  
+#ifdef SERIAL_NOTIFY_UPDATE
   Serial.println("LoRa: Packet sent");
+#endif
 }
 
 void loop() {
   if (!feed_the_beast(LORA_SEND_DELAY)) {
     return;
   }
+  
+  if (!locked_on) {
+    Serial.print(".");
+    return;
+  }
 
-  // If the beast has been well fed
-  Serial.println("GPS: New data");
+#ifdef SERIAL_NOTIFY_UPDATE
+  Serial.print("GPS: Data updated => ");
+  Serial.print("sat: ");
+  Serial.print(gps.satellites.value());
+  Serial.print(" lat: ");
+  Serial.print(gps.location.lat(), 6);
+  Serial.print(" lng: ");
+  Serial.println(gps.location.lng(), 6);
+#endif
+
   gps_data_t data {
     .lat = gps.location.lat(),
     .lng = gps.location.lng(),
     .sat_c = gps.satellites.value(),
-    .time = gps.time.value(),
+    .time = gps.time.value()
   };
   send_data(&data);
 }

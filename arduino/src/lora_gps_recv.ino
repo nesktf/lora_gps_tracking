@@ -13,14 +13,26 @@
 
 #define SRL_BAUD 9600
 
+#define GPS_WAIT_THRESH 60000 // 1 minute
+
+// #define USE_AP
 #define WIFI_DEBUG
 
+#ifdef USE_AP
+const char* ssid = "WiFi_feo";
+const char* pswd = "contrasena_segura";
+
+IPAddress local_ip{192, 168, 62, 53};
+IPAddress gateway {192, 168, 62, 1};
+IPAddress subnet {255, 255, 255, 0};
+#else
 const char* ssid = "my_funny_ssid";
 const char* pswd = "my_funny_pswd";
 
 IPAddress local_ip{192, 168, 0, 53};
-IPAddress gateway{192, 168, 0, 1};
-IPAddress subnet{255, 255, 255, 0};
+IPAddress gateway {192, 168, 0, 1};
+IPAddress subnet {255, 255, 255, 0};
+#endif
 
 
 typedef struct {
@@ -28,9 +40,12 @@ typedef struct {
   uint32_t sat_c{0}, time{0};
 } gps_data_t;
 
-
-gps_data_t gps_cache;
-unsigned long last_update = 0;
+static struct {
+  gps_data_t cache{};
+  unsigned long last_update{0};
+  int rssi{0};
+  bool available{false};
+} gps;
 
 ESP8266WebServer server{80};
 
@@ -67,7 +82,7 @@ static void init_wifi() {
 }
 
 template<typename Fun>
-static void init_server(const char* path, Fun&& f) {
+void init_server(const char* path, Fun&& f) {
   server.on(path, f);
   server.begin();
 
@@ -75,18 +90,22 @@ static void init_server(const char* path, Fun&& f) {
   Serial.println(path);
 }
 
-static String json_encode(const gps_data_t& data) {
+static String json_encode() {
   String out = "{";
-  out += "\"last_update\":";
-  out += String{last_update, 5};
+  out +="\"available\":";
+  out += String{gps.available};
+  out += ",\"last_update\":";
+  out += String{gps.last_update};
+  out += ",\"rssi\":";
+  out += String{gps.rssi};
   out += ",\"time\":";
-  out += String{data.time/100};
+  out += String{gps.cache.time/100};
   out += ",\"sat_count\":";
-  out += String{data.sat_c, 5};
+  out += String{gps.cache.sat_c, 5};
   out += ",\"lat\":";
-  out += String{data.lat, 6};
+  out += String{gps.cache.lat, 6};
   out += ",\"lng\":";
-  out += String{data.lng, 6};
+  out += String{gps.cache.lng, 6};
   out += "}";
   return out;
 }
@@ -98,19 +117,28 @@ void setup() {
   init_wifi();
   init_lora();
   init_server("/", []() {
-    String response = json_encode(gps_cache);
+    String response = json_encode();
     server.send(200, "text/json", response);
     Serial.print("Server: GET response -> ");
     Serial.println(response);
   });
 
   pinMode(LED_BUILTIN, OUTPUT);
+  
+  delay(100);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(100);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(100);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(100);
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
 
-static bool lora_poll(gps_data_t* data) {
+static bool lora_poll() {
   int packet_size = LoRa.parsePacket();
-  if (!packet_size) {
+  if(!packet_size) {
     return false;
   }
   
@@ -119,22 +147,33 @@ static bool lora_poll(gps_data_t* data) {
     return false;
   }
 
-  // No other checks allowed!!
   uint8_t buff[sizeof(gps_data_t)];
   size_t sz = sizeof(gps_data_t);
+  
   for (size_t i = 0; i < sz; ++i) {
     buff[i] = (uint8_t)LoRa.read();
   }
-  memcpy(data, buff, sz);
+  memcpy(&gps.cache, buff, sz);
 
+  
   Serial.print("LoRa: Received packet with RSSI ");
   Serial.println(LoRa.packetRssi());
+  gps.rssi = LoRa.packetRssi();
   return true;
 }
 
 void loop() {
-  if (lora_poll(&gps_cache)) {
-    last_update = millis();
+  if (lora_poll()) {
+    if (!gps.available) {
+      digitalWrite(LED_BUILTIN, LOW);
+      gps.available = true; 
+    }
+    gps.last_update = millis();
   }
+  if (gps.available && millis() - gps.last_update > GPS_WAIT_THRESH) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    gps.available = false;
+  }
+  
   server.handleClient();
 }
