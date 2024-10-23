@@ -55,11 +55,9 @@ manager::manager(fs::path cache_path, coord box_min, coord box_max, std::size_t 
   _cache(cache_path),
   _box_min(box_min), _box_max(box_max), _zoom(zoom) {}
 
-std::pair<coord, coord> manager::prepare_tiles() {
+bool manager::prepare_tiles() {
   const auto min_tile = coord2tile(coord{_box_min.x, _box_min.y}, _zoom);
   const auto max_tile = coord2tile(coord{_box_max.x, _box_max.y}, _zoom);
-  const auto new_max = tile2coord(min_tile, _zoom);
-  const auto new_min = tile2coord(max_tile + ntf::ivec2{1, 1}, _zoom);
 
   const std::size_t tile_size = 256;
   const ntf::ivec2 pixels {
@@ -97,30 +95,29 @@ std::pair<coord, coord> manager::prepare_tiles() {
         return {};
       };
 
-      _tiles.emplace_back(load_image(file), ntf::ivec2{
-        tile_size*(tile_coord.x - min_tile.x),
-        tile_size*(tile_coord.y - min_tile.y)
-      });
+      _tiles.emplace_back(load_image(file), tile_coord);
+      // ntf::ivec2{
+      //   tile_size*(tile_coord.x - min_tile.x),
+      //   tile_size*(tile_coord.y - min_tile.y)
+      // });
     }
   }
-  return {new_min, new_max};
+  _sz = (max_tile-min_tile);
+  _sz *= 256;
+  _min_tile = min_tile;
+  return true;
 }
 
 std::pair<tile, tile> manager::tex_size() {
   return std::make_pair(_tiles.front().offset, _tiles.back().offset);
 }
 
-void manager::render_tiles(gl::shader_program& shader, gl::framebuffer& fb) {
+void manager::render_tiles(ntf::camera2d& cam, gl::shader_program& shader, gl::framebuffer& fb) {
   fb.bind(1024, 1024, [&, this]() {
-    auto cam = ntf::camera2d{}
-      .viewport(1024, 1024)
-      .znear(-10.f)
-      .zfar(1.f)
-      .pos(512, 152);
-
     for (auto& tile : _tiles) {
+      ntf::ivec2 pos = 256*(tile.offset - _min_tile);
       auto transf = ntf::transform2d{}
-        .pos(tile.offset.x, tile.offset.y)
+        .pos(pos)
         .scale(256);
       shader.use();
       shader.set_uniform("model", transf.mat());

@@ -33,14 +33,12 @@ int main() {
     osm::coord{-24.87910, -65.45532}, // bottom right
     17
   };
-  auto bounds = manager.prepare_tiles();
+  manager.prepare_tiles();
 
   auto min_tile = osm::coord2tile(osm::coord{-24.87034, -65.46616}, 17);
 
   auto tsz = manager.tex_size();
-  auto coso = tsz.second - tsz.first;
 
-  ntf::log::debug("{} {}", coso.x, coso.y);
 
 
   // gl::framebuffer fbo{(ntf::vec2)window.size()*.5f};
@@ -55,7 +53,7 @@ int main() {
 
   auto shader2 = loader(ntf::file_contents("res/shader/tile.vs.glsl"), ntf::file_contents("res/shader/tile.fs.glsl"));
 
-  auto transf = ntf::transform2d{}.pos((ntf::vec2)window.size()*.5f).scale(coso.x);
+  auto transf = ntf::transform2d{}.pos((ntf::vec2)window.size()*.5f).scale(manager.size());
   auto camera = ntf::camera2d{}.pos((ntf::vec2)window.size()*.5f)
     .viewport(window.size()).zfar(1.f).znear(-10.f);
 
@@ -71,26 +69,48 @@ int main() {
     }
   });
 
-  auto get_xy = [&](float lat, float lon) {
-    auto max = bounds.second;
-    auto min = bounds.first;
-    float y_ratio = (lon - max.y)/(max.x);
-    return window.size()*vec2{x_ratio, y_ratio};
-  };
 
-  ntf::log::debug("{} {} {} {}", bounds.first.x, bounds.first.y, bounds.second.x, bounds.second.y);
-  // auto coord = get_xy(-24.872878, -65.462669);
-  auto coord = get_xy(-24.875672, -65.456650);
+  auto min = osm::tile2coord((ntf::vec2)tsz.first+ntf::vec2{.5f}, 17);
+  auto max = osm::tile2coord((ntf::vec2)tsz.second+ntf::vec2{.5f}, 17);
+
+  auto get_xy = [&](double lat, double lng) {
+    return glm::dvec2 {
+      1024*(lng-min.y)/(max.y - min.y),
+      1024*(lat-min.x)/(max.x - min.x),
+    };
+  };
+  auto coord = get_xy(-24.872878, -65.462669);
   ntf::log::debug("{} {}", coord.x, coord.y);
 
   ntf::texture_data<gl::texture2d>::loader thing;
   auto cino = thing("res/cirno.png", ntf::tex_filter::nearest, ntf::tex_wrap::repeat);
   auto cino_transform = ntf::transform2d{}
-    .scale(64);
+    .scale(64).pos(coord);
     // .pos(coord);
 
-  gl::framebuffer fbo{coso};
-  manager.render_tiles(shader2, fbo);
+
+  gl::framebuffer fbo{manager.size()};
+  auto cam = ntf::camera2d{}
+    .viewport(1024, 1024)
+    .znear(-10.f)
+    .zfar(1.f)
+    .pos(512, 512);
+  manager.render_tiles(cam, shader2, fbo);
+  fbo.bind(1024, 1024, [&]() {
+    shader2.use();
+    shader2.set_uniform("model", cino_transform.mat());
+    shader2.set_uniform("view", cam.view());
+    shader2.set_uniform("proj", cam.proj());
+    shader2.set_uniform("fb_sampler", (int)1);
+    cino.bind_sampler(1);
+    gl::draw_quad();
+
+    // auto coord = get_xy(-24.875672, -65.456650);
+    auto coord = get_xy(-24.873745, -65.457208);
+    cino_transform.pos(coord);
+    shader2.set_uniform("model", cino_transform.mat());
+    gl::draw_quad();
+  });
 
   ntf::shogle_main_loop(window, 60,
     [&](double dt, double alpha) {
@@ -104,13 +124,6 @@ int main() {
       fbo.tex().bind_sampler(0);
       gl::draw_quad();
 
-      shader2.use();
-      shader2.set_uniform("model", cino_transform.mat());
-      shader2.set_uniform("view", camera.view());
-      shader2.set_uniform("proj", camera.proj());
-      shader2.set_uniform("fb_sampler", (int)1);
-      cino.bind_sampler(1);
-      gl::draw_quad();
       // fbo.tex().bind_sampler((size_t)0);
       // cino.bind_sampler(0);
       imgui.end_frame();
