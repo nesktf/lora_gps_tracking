@@ -4,3 +4,6 @@
 [submodule "lib/TinyGPSPlus"]
 	path = arduino/lib/TinyGPSPlus
 	url = https://github.com/mikalhart/TinyGPSPlus.git
+[submodule "lib/shogle"]
+	path = client/lib/shogle
+	url = https://github.com/nesktf/shogle.git
