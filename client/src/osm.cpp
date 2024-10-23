@@ -39,23 +39,22 @@ bool download_thing(std::string_view url, std::string_view path) {
 
 }
 
-
-// std::string tile_path(ntf::vec2 coord, float zoom) {
-//   return fmt::format(osm_url, )
-// }
-
-
-
 } // namespace
 
 
 namespace osm {
 
-manager::manager(fs::path cache_path, coord box_min, coord box_max, std::size_t zoom) :
+map::map(fs::path cache_path, coord box_min, coord box_max, std::size_t zoom) :
   _cache(cache_path),
-  _box_min(box_min), _box_max(box_max), _zoom(zoom) {}
+  _box_min(box_min), _box_max(box_max), _zoom(zoom) { prepare_tiles(); }
 
-bool manager::prepare_tiles() {
+bool map::prepare_tiles() {
+
+  shader_loader loader;
+  auto vert = ntf::file_contents("res/shader/framebuffer.vs.glsl");
+  auto frag = ntf::file_contents("res/shader/framebuffer.fs.glsl");
+  _fbo_shader = loader(vert, frag);
+
   const auto min_tile = coord2tile(coord{_box_min.x, _box_min.y}, _zoom);
   const auto max_tile = coord2tile(coord{_box_max.x, _box_max.y}, _zoom);
 
@@ -67,8 +66,6 @@ bool manager::prepare_tiles() {
 
   const std::size_t total = (1 + max_tile.x- min_tile.x)*(1 + max_tile.y - min_tile.y);
   ntf::log::debug("Fetching {} tiles!", total);
-  ntf::log::debug("{} {} {} {}", max_tile.x, max_tile.y, min_tile.x, min_tile.y);
-
 
   for (int i = min_tile.x; i <= max_tile.x; ++i) {
     for (int j = min_tile.y; j <= max_tile.y; ++j) {
@@ -96,38 +93,44 @@ bool manager::prepare_tiles() {
       };
 
       _tiles.emplace_back(load_image(file), tile_coord);
-      // ntf::ivec2{
-      //   tile_size*(tile_coord.x - min_tile.x),
-      //   tile_size*(tile_coord.y - min_tile.y)
-      // });
     }
   }
   _sz = (max_tile-min_tile);
   _sz *= 256;
   _min_tile = min_tile;
+
+  auto tsz = std::make_pair(_tiles.front().offset, _tiles.back().offset);
+  _min_pos = osm::tile2coord(
+    static_cast<ntf::vec2>(tsz.first)+ntf::vec2{0.5f}, _zoom
+  );
+  _max_pos = osm::tile2coord(
+    static_cast<ntf::vec2>(tsz.second)+ntf::vec2{0.5f}, _zoom
+  );
+
+  _cam = ntf::camera2d{}
+    .viewport(size())
+    .znear(-10.f)
+    .zfar(1.f)
+    .pos(static_cast<ntf::vec2>(size())*.5f);
+  _fbo = gl::framebuffer{size()};
+
+  _transform = ntf::transform2d{}.scale(size());
   return true;
 }
 
-std::pair<tile, tile> manager::tex_size() {
-  return std::make_pair(_tiles.front().offset, _tiles.back().offset);
+ntf::vec2 map::coord2pos(float lat, float lng) {
+  auto sz = size();
+  return ntf::vec2 {
+    sz.y*(lng-_min_pos.y)/(_max_pos.y - _min_pos.y),
+    sz.x*(lat-_min_pos.x)/(_max_pos.x - _min_pos.x),
+  };
 }
 
-void manager::render_tiles(ntf::camera2d& cam, gl::shader_program& shader, gl::framebuffer& fb) {
-  fb.bind(1024, 1024, [&, this]() {
-    for (auto& tile : _tiles) {
-      ntf::ivec2 pos = 256*(tile.offset - _min_tile);
-      auto transf = ntf::transform2d{}
-        .pos(pos)
-        .scale(256);
-      shader.use();
-      shader.set_uniform("model", transf.mat());
-      shader.set_uniform("view", cam.view());
-      shader.set_uniform("proj", cam.proj());
-      shader.set_uniform("fb_sampler", (int)0);
-      tile.tex.bind_sampler(0);
-      gl::draw_quad();
-    }
-  });
+osm::map::map_object* map::add_object(gl::texture2d* tex, ntf::vec2 map_coords) {
+  _objects.emplace_back(tex, map_coords, ntf::transform2d{}.pos(coord2pos(
+    map_coords.x, map_coords.y
+  )).scale(tex->dim()));
+  return &_objects.back();
 }
 
 } // namespace osm
