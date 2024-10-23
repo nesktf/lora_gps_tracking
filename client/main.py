@@ -148,7 +148,7 @@ refresh_rate = 0.01
 window_size = (1280, 800)
 pygame.init()
 
-osm = OSMManager(cache="maptiles/")
+osm = OSMManager(cache="tile_cache/")
 bg_big, new_bounds = osm.create_osm_image(bounding_box, zoom=17)
 
 wh_ratio = float(bg_big.get_width()) / bg_big.get_height()

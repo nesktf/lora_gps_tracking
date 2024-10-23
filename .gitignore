@@ -1,6 +1,5 @@
 client/build/
 client/.cache/
 client/imgui.ini
-client/py_proto/client_venv/
-client/py_proto/maptiles/
+client/client_venv/
 client/tile_cache/
