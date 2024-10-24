@@ -8,16 +8,16 @@ bool nodemcu_connected{false};
 osm::gps_data gps_data;
 std::mutex gps_mtx;
 
-const std::string_view nodemcu_url = "http://192.168.0.53:80";
+const std::string_view nodemcu_url = "http://192.168.89.53:80";
 std::chrono::high_resolution_clock::time_point last_update;
 
 std::vector<std::pair<std::string, ntf::transform2d>> texts {
-  {"conn:", ntf::transform2d{}.pos(25, 50)},
-  {"avail:", ntf::transform2d{}.pos(25, 100)},
-  {"lat:", ntf::transform2d{}.pos(25, 150)},
-  {"lng:", ntf::transform2d{}.pos(25, 200)},
-  {"sat:", ntf::transform2d{}.pos(25, 250)},
-  {"last update:", ntf::transform2d{}.pos(25, 900)},
+  {"conn:", ntf::transform2d{}.pos(25, -250)},
+  {"avail:", ntf::transform2d{}.pos(25, -200)},
+  {"lat:", ntf::transform2d{}.pos(25, -150)},
+  {"lng:", ntf::transform2d{}.pos(25, -100)},
+  {"sat:", ntf::transform2d{}.pos(25, -50)},
+  {"last update:", ntf::transform2d{}.pos(25, 50)},
 };
 
 int main() {
@@ -33,8 +33,8 @@ int main() {
 
 
   osm::map map{"tile_cache/",
-    osm::coord{-24.87034, -65.46616}, // top left
-    osm::coord{-24.87910, -65.45532}, // bottom right
+    osm::coord{-24.737526, -65.394627}, // top left
+    osm::coord{-24.744542, -65.387117}, // bottom right
     17
   };
 
@@ -112,11 +112,9 @@ int main() {
     cousine.draw_text(ntf::vec2{0.f}, 1.f, text);
   };
 
-  // map.add_object(&cino, ntf::vec2{-24.872878, -65.462669});
-  // map.add_object(&cino, ntf::vec2{-24.875672, -65.456650});
-  // map.add_object(&cino, ntf::vec2{-24.873745, -65.457208});
 
-  map.transform().pos((ntf::vec2)window.size()*.5f);
+  auto sz = (ntf::vec2)map.size();
+  map.transform().pos((ntf::vec2)window.size()*.5f).scale(sz*2.f);
 
   window.set_viewport_event([&](std::size_t w, std::size_t h) {
     gl::set_viewport(w, h);
@@ -147,8 +145,13 @@ int main() {
       gl::draw_quad();
     });
 
+    auto vp = window.size();
     for (auto& [text, transf] : texts) {
-      draw_text(transf, text);
+      auto ntransf = transf;
+      if (ntransf.pos().y < 0) {
+        ntransf.pos(ntransf.pos().x, vp.y+ntransf.pos().y);
+      }
+      draw_text(ntransf, text);
     }
 
     imgui.end_frame();
@@ -179,11 +182,10 @@ int main() {
     if (!marker) {
       marker = map.add_object(&cino, ntf::vec2{gps_data.lat, gps_data.lng});
 
-      marker->transform.scale(ntf::vec2{32, 32});
+      marker->transform.scale(ntf::vec2{16, 16});
       return;
     }
 
-    ntf::log::debug("A");
     marker->hidden = false;
     map.update_object(marker, ntf::vec2{gps_data.lat, gps_data.lng});
   };
