@@ -179,7 +179,7 @@ def cino_pos(t):
 
     return interpolate(p1, p2, t/20)
 
-baka = MapObject("../res/cirno.png", get_xy, cino_pos)
+baka = MapObject("client/res/cirno.png", get_xy, cino_pos)
 
 should_close = False
 
