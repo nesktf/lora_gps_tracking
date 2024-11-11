@@ -114,7 +114,7 @@ int main() {
 
 
   auto sz = (ntf::vec2)map.size();
-  map.transform().pos((ntf::vec2)window.size()*.5f).scale(sz*2.f);
+  map.transform().pos((ntf::vec2)window.size()*.5f+ntf::vec2{256,256}).scale(sz*2.f);
 
   window.set_viewport_event([&](std::size_t w, std::size_t h) {
     gl::set_viewport(w, h);
@@ -126,6 +126,22 @@ int main() {
     if (code == keycode::key_escape && state == keystate::press) {
       window.close();
     }
+
+    const float mov = 128.f;
+    auto pos = map.transform().pos();
+    if (code == keycode::key_left && state == keystate::press) {
+      pos.x += mov;
+    } else if (code == keycode::key_right && state == keystate::press) {
+      pos.x -= mov;
+    }
+
+    if (code == keycode::key_up && state == keystate::press) {
+      pos.y += mov;
+    } else if (code == keycode::key_down && state == keystate::press) {
+      pos.y -= mov;
+    }
+
+    map.transform().pos(pos);
   });
 
   auto render = [&](double, double) {
