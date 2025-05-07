@@ -1,213 +1,283 @@
+#include "renderer.hpp"
 #include "osm.hpp"
+//
+// ntf::thread_pool threadpool;
+// std::atomic<bool> should_die{false};
+// std::atomic<bool> new_data{false};
+// bool nodemcu_connected{false};
+//
+// osm::gps_data gps_data;
+// std::mutex gps_mtx;
+//
+// std::chrono::high_resolution_clock::time_point last_update;
+//
+// std::vector<std::pair<std::string, ntf::transform2d>> texts {
+//   {"conn:", ntf::transform2d{}.pos(25, -250)},
+//   {"avail:", ntf::transform2d{}.pos(25, -200)},
+//   {"lat:", ntf::transform2d{}.pos(25, -150)},
+//   {"lng:", ntf::transform2d{}.pos(25, -100)},
+//   {"sat:", ntf::transform2d{}.pos(25, -50)},
+//   {"last update:", ntf::transform2d{}.pos(25, 50)},
+// };
+//
+static dvec2 map_min{-24.737526, -65.394627}; // top left
+static dvec2 map_max{-24.744542, -65.387117}; // bottom right
+static uint32 map_zoom = 17u;
+static float tile_sz = 256.f;
 
-ntf::thread_pool threadpool;
-std::atomic<bool> should_die{false};
-std::atomic<bool> new_data{false};
-bool nodemcu_connected{false};
+static const char* cache_dir = "tile_cache/";
+static const char* nodemcu_url = "http://192.168.89.53:80";
 
-osm::gps_data gps_data;
-std::mutex gps_mtx;
-
-const std::string_view nodemcu_url = "http://192.168.89.53:80";
-std::chrono::high_resolution_clock::time_point last_update;
-
-std::vector<std::pair<std::string, ntf::transform2d>> texts {
-  {"conn:", ntf::transform2d{}.pos(25, -250)},
-  {"avail:", ntf::transform2d{}.pos(25, -200)},
-  {"lat:", ntf::transform2d{}.pos(25, -150)},
-  {"lng:", ntf::transform2d{}.pos(25, -100)},
-  {"sat:", ntf::transform2d{}.pos(25, -50)},
-  {"last update:", ntf::transform2d{}.pos(25, 50)},
+struct map_object {
+  size_t tex;
+  ntf::transform2d<float> transform;
 };
 
-int main() {
-  logger::set_level(logger::level::verbose);
+static auto& init_renderer() {
+  auto vert_src = ntf::file_contents("res/shader/tile.vs.glsl").value(); 
+  auto frag_src = ntf::file_contents("res/shader/tile.fs.glsl").value();
+  auto font_atlas = ntf::load_font_atlas<char>("res/font/CousineNerdFont-Regular.ttf").value();
+  return render_ctx::construct(vert_src, frag_src, std::move(font_atlas), {1280, 720});
+}
 
-  auto glfw = ntf::glfw::init();
-  glfw::set_swap_interval(0);
+int main(int argc, const char* argv[]) {
+  logger::set_level(ntf::log_level::verbose);
+  if (argc >= 2) {
+    cache_dir = argv[1];
+  }
+  if (argc >= 3) {
+    nodemcu_url = argv[2];
+  }
+  logger::info("[main] Tile cache dir: \"{}\"", cache_dir);
+  logger::info("[main] NodeMCU API url: \"{}\"", nodemcu_url);
 
-  glfw::window<ntf::gl_renderer> window{1024, 1024, "test"};
-  auto imgui = ntf::imgui::init(window, ntf::imgui::glfw_gl3_impl{});
-
-  gl::set_blending(true);
-
-
-  osm::map map{"tile_cache/",
-    osm::coord{-24.737526, -65.394627}, // top left
-    osm::coord{-24.744542, -65.387117}, // bottom right
-    17
-  };
-
-  threadpool.enqueue([&]() {
-    using namespace std::chrono_literals;
-    using nlohmann::json;
-
-    std::string json_string;
-    while (!should_die.load()) {
-      if (!osm::download_string(nodemcu_url, json_string)) {
-        std::unique_lock lock{gps_mtx};
-        ntf::log::error("Failed to connect to NodeMCU");
-        gps_data.available = false;
-        nodemcu_connected = false;
-        new_data.store(true);
-        std::this_thread::sleep_for(5s);
-        continue;
+  auto& render = init_renderer();
+  render.cam_pos(200.f, 200.f);
+  render.window().set_key_press_callback([&](auto& win, const ntf::win_key_data& key) {
+    auto cam_pos = render.cam_pos();
+    if (key.action == ntf::win_action::press) {
+      if (key.key == ntf::win_key::escape) {
+        win.close();
       }
-
-      try {
-        json contents = json::parse(json_string);
-        std::unique_lock lock{gps_mtx};
-        gps_data.available = static_cast<bool>(contents["available"].get<int>());
-        gps_data.rssi = contents["rssi"].get<int>();
-        gps_data.time = contents["time"].get<uint32_t>();
-        gps_data.sat_c = contents["sat_count"].get<uint32_t>();
-        gps_data.lat = contents["lat"].get<float>();
-        gps_data.lng = contents["lng"].get<float>();
-        nodemcu_connected = true;
+      if (key.key == ntf::win_key::up) {
+        cam_pos.y += 100.f;
+      } else if (key.key == ntf::win_key::down){
+        cam_pos.y -= 100.f;
       }
-      catch (json::exception& e) {
-        std::unique_lock lock{gps_mtx};
-        ntf::log::error("Failed to parse GPS json {}", e.what());
-        gps_data.available = false;
-        new_data.store(true);
-        std::this_thread::sleep_for(5s);
-        continue;
+      if (key.key == ntf::win_key::left) {
+        cam_pos.x -= 100.f;
+      } else if (key.key == ntf::win_key::right) {
+        cam_pos.x += 100.f;
       }
-      
-      last_update = std::chrono::high_resolution_clock::now();
-      ntf::log::info("GPS data updated {}", last_update);
-      new_data.store(true);
-      std::this_thread::sleep_for(5s);
-    };
+    }
+    render.cam_pos(cam_pos.x, cam_pos.y);
+  });
+  render.window().set_viewport_callback([&](auto&, const ntf::extent2d& ext) {
+    render.update_viewport(ext.x, ext.y);
   });
 
+  osm_map map{cache_dir};
+  std::vector<map_object> objs;
+  {
+    const auto tiles = map.load_tiles(map_min, map_max, map_zoom, tile_sz);
+    objs.reserve(tiles.size()+1u);
 
-  shader_loader sloader;
-  auto tile_shader = sloader(
-    ntf::file_contents("res/shader/tile.vs.glsl"), 
-    ntf::file_contents("res/shader/tile.fs.glsl")
-  );
-  auto font_shader = sloader(
-    ntf::file_contents("res/shader/font.vs.glsl"),
-    ntf::file_contents("res/shader/font.fs.glsl")
-  );
+    for (const auto& tile : tiles) {
+      auto tile_transf = ntf::transform2d<float>{}
+        .pos(tile.pos.x, tile.pos.y).scale(tile_sz);
+      logger::debug(" => {} {}", tile_transf.pos_x(), tile_transf.pos_y());
+      objs.emplace_back(render.make_texture(tile.image), tile_transf);
+    }
+    auto marker_data = ntf::load_image<ntf::uint8>("res/cirno.png").value();
+    objs.emplace_back(render.make_texture(marker_data), ntf::transform2d<float>{}
+      .pos(200.f, 200.f).scale(200.f));
+  }
 
-  texture_loader tloader;
-  auto cino = tloader("res/marker.png", ntf::tex_filter::nearest, ntf::tex_wrap::repeat);
-
-
-  font_loader floader;
-  auto cousine = floader("res/font/CousineNerdFont-Regular.ttf");
-
-  auto camera = ntf::camera2d{}.pos((ntf::vec2)window.size()*.5f)
-    .viewport(window.size()).zfar(1.f).znear(-10.f);
-
-
-  auto draw_text = [&](ntf::transform2d& transf, const std::string& text) {
-    font_shader.use();
-    font_shader.set_uniform("proj", camera.proj());
-    font_shader.set_uniform("model", transf.mat());
-    font_shader.set_uniform("text_color", ntf::color4{0.f, 0.f, 0.f, 1.f});
-    font_shader.set_uniform("tex", 0);
-    cousine.draw_text(ntf::vec2{0.f}, 1.f, text);
-  };
-
-
-  auto sz = (ntf::vec2)map.size();
-  map.transform().pos((ntf::vec2)window.size()*.5f+ntf::vec2{256,256}).scale(sz*2.f);
-
-  window.set_viewport_event([&](std::size_t w, std::size_t h) {
-    gl::set_viewport(w, h);
-    camera.viewport(w, h).pos(.5f*ntf::vec2{w, h});
-    map.transform().pos((ntf::vec2)window.size()*.5f);
+  auto query = map.query_gps();
+  render.start_loop([&](float) {
+    render.render_string(100.f, 500.f, 1.f, query.info);
+    render.render_text(100.f, 150.f, 1.f, "~ze");
+    for (auto& obj : objs) {
+      render.render_texture(obj.tex, obj.transform.world());
+    }
   });
+  render_ctx::destroy();
 
-  window.set_key_event([&](keycode code, auto, keystate state, auto) { 
-    if (code == keycode::key_escape && state == keystate::press) {
-      window.close();
-    }
-
-    const float mov = 128.f;
-    auto pos = map.transform().pos();
-    if (code == keycode::key_left && state == keystate::press) {
-      pos.x += mov;
-    } else if (code == keycode::key_right && state == keystate::press) {
-      pos.x -= mov;
-    }
-
-    if (code == keycode::key_up && state == keystate::press) {
-      pos.y += mov;
-    } else if (code == keycode::key_down && state == keystate::press) {
-      pos.y -= mov;
-    }
-
-    map.transform().pos(pos);
-  });
-
-  auto render = [&](double, double) {
-    imgui.start_frame();
-    gl::clear_viewport(ntf::color3{.3f});
-
-    map.render(window.size(),camera, [&](ntf::transform2d& obj_transf, ntf::camera2d& map_cam, 
-                                         const int sampler, const bool hidden) {
-      if (hidden) {
-        return;
-      }
-      tile_shader.use();
-      tile_shader.set_uniform("model", obj_transf.mat());
-      tile_shader.set_uniform("view", map_cam.view());
-      tile_shader.set_uniform("proj", map_cam.proj());
-      tile_shader.set_uniform("fb_sampler", sampler);
-      gl::draw_quad();
-    });
-
-    auto vp = window.size();
-    for (auto& [text, transf] : texts) {
-      auto ntransf = transf;
-      if (ntransf.pos().y < 0) {
-        ntransf.pos(ntransf.pos().x, vp.y+ntransf.pos().y);
-      }
-      draw_text(ntransf, text);
-    }
-
-    imgui.end_frame();
-  };
-
-  osm::map::map_object* marker{nullptr};
-
-  auto tick = [&]() {
-    if (!new_data.load()) {
-      return;
-    }
-    texts[0].first = fmt::format("conn: {}", nodemcu_connected ? "true" : "false");
-    texts[1].first = fmt::format("avail: {}", gps_data.available ? "true" : "false");
-    texts[2].first = fmt::format("lat: {}", gps_data.lat);
-    texts[3].first = fmt::format("lng: {}", gps_data.lng);
-    texts[4].first = fmt::format("sat: {}", gps_data.sat_c);
-    texts[5].first = fmt::format("last update: {}", last_update);
-
-    new_data.store(false);
-
-    if (!gps_data.available) {
-      if (marker) {
-        marker->hidden = true;
-      }
-      return;
-    }
-
-    if (!marker) {
-      marker = map.add_object(&cino, ntf::vec2{gps_data.lat, gps_data.lng});
-
-      marker->transform.scale(ntf::vec2{16, 16});
-      return;
-    }
-
-    marker->hidden = false;
-    map.update_object(marker, ntf::vec2{gps_data.lat, gps_data.lng});
-  };
-
-  ntf::shogle_main_loop(window, 60, render, tick);
-  should_die.store(true);
+  // osm::map map{"tile_cache/",
+  //   osm::coord{-24.737526, -65.394627}, // top left
+  //   osm::coord{-24.744542, -65.387117}, // bottom right
+  //   17
+  // };
+  //
+  // threadpool.enqueue([&]() {
+  //   using namespace std::chrono_literals;
+  //   using nlohmann::json;
+  //
+  //   std::string json_string;
+  //   while (!should_die.load()) {
+  //     if (!osm::download_string(nodemcu_url, json_string)) {
+  //       std::unique_lock lock{gps_mtx};
+  //       ntf::log::error("Failed to connect to NodeMCU");
+  //       gps_data.available = false;
+  //       nodemcu_connected = false;
+  //       new_data.store(true);
+  //       std::this_thread::sleep_for(5s);
+  //       continue;
+  //     }
+  //
+  //     try {
+  //       json contents = json::parse(json_string);
+  //       std::unique_lock lock{gps_mtx};
+  //       gps_data.available = static_cast<bool>(contents["available"].get<int>());
+  //       gps_data.rssi = contents["rssi"].get<int>();
+  //       gps_data.time = contents["time"].get<uint32_t>();
+  //       gps_data.sat_c = contents["sat_count"].get<uint32_t>();
+  //       gps_data.lat = contents["lat"].get<float>();
+  //       gps_data.lng = contents["lng"].get<float>();
+  //       nodemcu_connected = true;
+  //     }
+  //     catch (json::exception& e) {
+  //       std::unique_lock lock{gps_mtx};
+  //       ntf::log::error("Failed to parse GPS json {}", e.what());
+  //       gps_data.available = false;
+  //       new_data.store(true);
+  //       std::this_thread::sleep_for(5s);
+  //       continue;
+  //     }
+  //     
+  //     last_update = std::chrono::high_resolution_clock::now();
+  //     ntf::log::info("GPS data updated {}", last_update);
+  //     new_data.store(true);
+  //     std::this_thread::sleep_for(5s);
+  //   };
+  // });
+  //
+  //
+  // shader_loader sloader;
+  // auto tile_shader = sloader(
+  //
+  // );
+  // auto font_shader = sloader(
+  //   ntf::file_contents("res/shader/font.vs.glsl"),
+  //   ntf::file_contents("res/shader/font.fs.glsl")
+  // );
+  //
+  // texture_loader tloader;
+  // auto cino = tloader("res/marker.png", ntf::tex_filter::nearest, ntf::tex_wrap::repeat);
+  //
+  //
+  // font_loader floader;
+  // auto cousine = floader("res/font/CousineNerdFont-Regular.ttf");
+  //
+  // auto camera = ntf::camera2d{}.pos((ntf::vec2)window.size()*.5f)
+  //   .viewport(window.size()).zfar(1.f).znear(-10.f);
+  //
+  //
+  // auto draw_text = [&](ntf::transform2d& transf, const std::string& text) {
+  //   font_shader.use();
+  //   font_shader.set_uniform("proj", camera.proj());
+  //   font_shader.set_uniform("model", transf.mat());
+  //   font_shader.set_uniform("text_color", ntf::color4{0.f, 0.f, 0.f, 1.f});
+  //   font_shader.set_uniform("tex", 0);
+  //   cousine.draw_text(ntf::vec2{0.f}, 1.f, text);
+  // };
+  //
+  //
+  // auto sz = (ntf::vec2)map.size();
+  // map.transform().pos((ntf::vec2)window.size()*.5f+ntf::vec2{256,256}).scale(sz*2.f);
+  //
+  // window.set_viewport_event([&](std::size_t w, std::size_t h) {
+  //   gl::set_viewport(w, h);
+  //   camera.viewport(w, h).pos(.5f*ntf::vec2{w, h});
+  //   map.transform().pos((ntf::vec2)window.size()*.5f);
+  // });
+  //
+  // window.set_key_event([&](keycode code, auto, keystate state, auto) { 
+  //   if (code == keycode::key_escape && state == keystate::press) {
+  //     window.close();
+  //   }
+  //
+  //   const float mov = 128.f;
+  //   auto pos = map.transform().pos();
+  //   if (code == keycode::key_left && state == keystate::press) {
+  //     pos.x += mov;
+  //   } else if (code == keycode::key_right && state == keystate::press) {
+  //     pos.x -= mov;
+  //   }
+  //
+  //   if (code == keycode::key_up && state == keystate::press) {
+  //     pos.y += mov;
+  //   } else if (code == keycode::key_down && state == keystate::press) {
+  //     pos.y -= mov;
+  //   }
+  //
+  //   map.transform().pos(pos);
+  // });
+  //
+  // auto render = [&](double, double) {
+  //   imgui.start_frame();
+  //   gl::clear_viewport(ntf::color3{.3f});
+  //
+  //   map.render(window.size(),camera, [&](ntf::transform2d& obj_transf, ntf::camera2d& map_cam, 
+  //                                        const int sampler, const bool hidden) {
+  //     if (hidden) {
+  //       return;
+  //     }
+  //     tile_shader.use();
+  //     tile_shader.set_uniform("model", obj_transf.mat());
+  //     tile_shader.set_uniform("view", map_cam.view());
+  //     tile_shader.set_uniform("proj", map_cam.proj());
+  //     tile_shader.set_uniform("fb_sampler", sampler);
+  //     gl::draw_quad();
+  //   });
+  //
+  //   auto vp = window.size();
+  //   for (auto& [text, transf] : texts) {
+  //     auto ntransf = transf;
+  //     if (ntransf.pos().y < 0) {
+  //       ntransf.pos(ntransf.pos().x, vp.y+ntransf.pos().y);
+  //     }
+  //     draw_text(ntransf, text);
+  //   }
+  //
+  //   imgui.end_frame();
+  // };
+  //
+  // osm::map::map_object* marker{nullptr};
+  //
+  // auto tick = [&]() {
+  //   if (!new_data.load()) {
+  //     return;
+  //   }
+  //   texts[0].first = fmt::format("conn: {}", nodemcu_connected ? "true" : "false");
+  //   texts[1].first = fmt::format("avail: {}", gps_data.available ? "true" : "false");
+  //   texts[2].first = fmt::format("lat: {}", gps_data.lat);
+  //   texts[3].first = fmt::format("lng: {}", gps_data.lng);
+  //   texts[4].first = fmt::format("sat: {}", gps_data.sat_c);
+  //   texts[5].first = fmt::format("last update: {}", last_update);
+  //
+  //   new_data.store(false);
+  //
+  //   if (!gps_data.available) {
+  //     if (marker) {
+  //       marker->hidden = true;
+  //     }
+  //     return;
+  //   }
+  //
+  //   if (!marker) {
+  //     marker = map.add_object(&cino, ntf::vec2{gps_data.lat, gps_data.lng});
+  //
+  //     marker->transform.scale(ntf::vec2{16, 16});
+  //     return;
+  //   }
+  //
+  //   marker->hidden = false;
+  //   map.update_object(marker, ntf::vec2{gps_data.lat, gps_data.lng});
+  // };
+  //
+  // ntf::shogle_main_loop(window, 60, render, tick);
+  // should_die.store(true);
 
   return 0;
 }
