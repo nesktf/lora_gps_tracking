@@ -11,13 +11,38 @@ namespace fs = std::filesystem;
 
 using chrono_clock = std::chrono::high_resolution_clock;
 
-class osm_map {
+using gps_coord = dvec2;
+using tile_coord = ivec2;
+
+class osm_tileset {
 public:
-  struct tile_data {
+  static constexpr uint32 TILE_SIZE = 256u; // pixels
+
+  struct tile_t {
     ntf::image_data image;
     vec2 pos;
   };
 
+public:
+  osm_tileset(std::vector<tile_t>&& tiles, vec2 min_coord, vec2 max_coord, vec2 size) noexcept;
+
+public:
+  vec2 pos_from_coord(gps_coord coord) const;
+
+  gps_coord min_coord() const { return _min_coord; }
+  gps_coord max_coord() const { return _max_coord;}
+
+public:
+  ntf::cspan<tile_t> tiles() const { return {_tiles.data(), _tiles.size()}; }
+
+private:
+  std::vector<tile_t> _tiles;
+  gps_coord _min_coord, _max_coord;
+  vec2 _size;
+};
+
+class osm_map {
+public:
   struct gps_data {
     float lat, lng;
     uint32 sat_c, time;
@@ -36,8 +61,7 @@ public:
   osm_map(fs::path cache_path);
 
 public:
-  std::vector<tile_data> load_tiles(dvec2 box_min, dvec2 box_max,
-                                    uint32 zoom, uint32 tile_size);
+  osm_tileset load_tiles(gps_coord min_coord, gps_coord max_coord, uint32 zoom);
 
 public:
   gps_query query_gps();

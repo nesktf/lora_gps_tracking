@@ -31,7 +31,8 @@ public:
   void update_viewport(ntf::uint32 w, ntf::uint32 h);
 
   void cam_pos(float x, float y) {
-    _cam_pos.x = x; _cam_pos.y = y;
+    _cam_pos.x = x;
+    _cam_pos.y = y;
     _gen_view();
   }
   vec2 cam_pos() const { return _cam_pos; }
@@ -59,7 +60,6 @@ public:
   void start_loop(F&& fun) {
     ntf::shogle_render_loop(_win, _ctx, [&](float dt){
       _text_buff.clear();
-      _frenderer.clear_state();
       fun(dt);
       _on_render(dt);
     });

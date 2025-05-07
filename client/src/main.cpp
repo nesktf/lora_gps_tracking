@@ -20,10 +20,9 @@
 //   {"last update:", ntf::transform2d{}.pos(25, 50)},
 // };
 //
-static dvec2 map_min{-24.737526, -65.394627}; // top left
-static dvec2 map_max{-24.744542, -65.387117}; // bottom right
-static uint32 map_zoom = 17u;
-static float tile_sz = 256.f;
+static gps_coord map_min{-24.737526, -65.394627}; // top left
+static gps_coord map_max{-24.744542, -65.387117}; // bottom right
+static uint32 map_zoom = 18u;
 
 static const char* cache_dir = "tile_cache/";
 static const char* nodemcu_url = "http://192.168.89.53:80";
@@ -52,7 +51,7 @@ int main(int argc, const char* argv[]) {
   logger::info("[main] NodeMCU API url: \"{}\"", nodemcu_url);
 
   auto& render = init_renderer();
-  render.cam_pos(200.f, 200.f);
+  render.cam_pos(0.f, 0.f);
   render.window().set_key_press_callback([&](auto& win, const ntf::win_key_data& key) {
     auto cam_pos = render.cam_pos();
     if (key.action == ntf::win_action::press) {
@@ -60,14 +59,14 @@ int main(int argc, const char* argv[]) {
         win.close();
       }
       if (key.key == ntf::win_key::up) {
-        cam_pos.y += 100.f;
+        cam_pos.y += 256.f;
       } else if (key.key == ntf::win_key::down){
-        cam_pos.y -= 100.f;
+        cam_pos.y -= 256.f;
       }
       if (key.key == ntf::win_key::left) {
-        cam_pos.x -= 100.f;
+        cam_pos.x -= 256.f;
       } else if (key.key == ntf::win_key::right) {
-        cam_pos.x += 100.f;
+        cam_pos.x += 256.f;
       }
     }
     render.cam_pos(cam_pos.x, cam_pos.y);
@@ -78,25 +77,36 @@ int main(int argc, const char* argv[]) {
 
   osm_map map{cache_dir};
   std::vector<map_object> objs;
+  gps_coord cino_coord{-24.739718, -65.391220};
   {
-    const auto tiles = map.load_tiles(map_min, map_max, map_zoom, tile_sz);
-    objs.reserve(tiles.size()+1u);
+    const auto tileset = map.load_tiles(map_min, map_max, map_zoom);
+    objs.reserve(tileset.tiles().size()+1u);
 
-    for (const auto& tile : tiles) {
+    for (const auto& tile : tileset.tiles()) {
       auto tile_transf = ntf::transform2d<float>{}
-        .pos(tile.pos.x, tile.pos.y).scale(tile_sz);
+        .pos(tile.pos.x, tile.pos.y).scale(tileset.TILE_SIZE);
       logger::debug(" => {} {}", tile_transf.pos_x(), tile_transf.pos_y());
       objs.emplace_back(render.make_texture(tile.image), tile_transf);
     }
     auto marker_data = ntf::load_image<ntf::uint8>("res/cirno.png").value();
+    // cino_coord = tileset.max_coord();
+    const auto cino_pos = tileset.pos_from_coord(cino_coord);
+    logger::debug("CINO: {} {}", cino_pos.x, cino_pos.y);
     objs.emplace_back(render.make_texture(marker_data), ntf::transform2d<float>{}
-      .pos(200.f, 200.f).scale(200.f));
+      .pos(cino_pos).scale(64.f));
+    render.cam_pos(cino_pos.x, cino_pos.y);
   }
+
 
   auto query = map.query_gps();
   render.start_loop([&](float) {
+    auto& cino = objs.back().transform;
+    auto cam_pos = render.cam_pos();
     render.render_string(100.f, 500.f, 1.f, query.info);
     render.render_text(100.f, 150.f, 1.f, "~ze");
+    render.render_text(100.f, 200.f, 1.f, "map_pos {},{}", cam_pos.x, cam_pos.y);
+    render.render_text(100.f, 250.f, 1.f, "cino_coord {:.7f},{:.7f}", cino_coord.x, cino_coord.y);
+    render.render_text(100.f, 300.f, 1.f, "cino_pos {:.2f},{:.2f}", cino.pos_x(), cino.pos_y());
     for (auto& obj : objs) {
       render.render_texture(obj.tex, obj.transform.world());
     }

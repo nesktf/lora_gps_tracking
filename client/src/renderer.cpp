@@ -97,7 +97,9 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
 
 void render_ctx::_on_render([[maybe_unused]] float dt) {
   auto fbo = ntf::renderer_framebuffer::default_fbo(_ctx);
-  _frenderer.render(_quad, fbo, _frule, _text_buff);
+  _frenderer.clear_state();
+  _frenderer.append_text(_text_buff);
+  _frenderer.render(_quad, fbo, _frule);
 }
 
 size_t render_ctx::make_texture(const ntf::image_data& image) {
@@ -111,7 +113,7 @@ size_t render_ctx::make_texture(const ntf::image_data& image) {
     .images = {desc},
     .gen_mipmaps = false,
     .sampler = ntf::r_texture_sampler::nearest,
-    .addressing = ntf::r_texture_address::repeat,
+    .addressing = ntf::r_texture_address::clamp_edge,
   }).value());
   return _texs.size()-1;
 }

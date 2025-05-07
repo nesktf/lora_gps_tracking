@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+namespace curlopts = curlpp::Options;
+
 static const char* CURL_UA =
   "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0";
 
@@ -13,8 +15,6 @@ static std::string format_osm_url(ivec2 tile, uint32 zoom) {
   return fmt::format("https://tile.openstreetmap.org/{}/{}/{}.png",
                      zoom, tile.x, tile.y);
 }
-
-namespace curlopts = curlpp::Options;
 
 // Synchronous
 static bool download_to_file(std::string_view url, const fs::path& path) {
@@ -65,29 +65,39 @@ static bool download_string(std::string_view url, std::string& contents) {
   return false;
 }
 
-static ivec2 coord2tile(dvec2 coord, uint32 zoom) {
-  const double lat = glm::radians(coord.x);
-  const double n = static_cast<double>(int{1 << zoom});
+static constexpr float QUAD_CORRECTION = .5f;
+
+static tile_coord coord2tile(gps_coord coord, uint32 zoom) {
+  const auto lat = glm::radians(coord.x);
+  const auto n = static_cast<float>(int{1 << zoom});
   const int xtile = static_cast<int>(n*(coord.y + 180.) / 360.);
   const int ytile = static_cast<int>((1.-std::log(std::tan(lat) + (1./std::cos(lat)))/M_PI)*.5*n);
   return {xtile, ytile};
 }
 
-static dvec2 tile2coord(ivec2 tile, uint32 zoom) {
-  const double n = static_cast<double>(int{1 << zoom});
-  const double lon = (tile.x/n)*360. - 180.;
-  const double lat = glm::degrees(std::atan(std::sinh(M_PI*(1-2*tile.y / n))));
+static gps_coord tile2coord(tile_coord tile, uint32 zoom) {
+  const auto n = static_cast<float>(int{1 << zoom});
+  const float lon = (tile.x/n)*360. - 180.;
+  const float lat = glm::degrees(std::atan(std::sinh(M_PI*(1-2*tile.y / n))));
   return {lat, lon};
+}
+
+osm_tileset::osm_tileset(std::vector<tile_t>&& tiles, vec2 min_coord,
+                         vec2 max_coord, vec2 size) noexcept :
+  _tiles{std::move(tiles)}, _min_coord{min_coord}, _max_coord{max_coord}, _size{size} {}
+
+vec2 osm_tileset::pos_from_coord(gps_coord coord) const {
+  const float x = (_size.x*(coord.x-_min_coord.x)/(_max_coord.x-_min_coord.x));
+  const float y = -(_size.y*(coord.y-_min_coord.y)/(_max_coord.y-_min_coord.y));
+  return {x, y};
 }
 
 osm_map::osm_map(fs::path cache_path) :
   _cache{cache_path}, _gps{} {}
 
-auto osm_map::load_tiles(
-  dvec2 box_min, dvec2 box_max, uint32 zoom, uint32 tile_size
-) -> std::vector<tile_data> {
-  const auto min_tile = coord2tile(box_min, zoom);
-  const auto max_tile = coord2tile(box_max, zoom);
+osm_tileset osm_map::load_tiles(gps_coord min_coord, gps_coord max_coord, uint32 zoom) {
+  const auto min_tile = coord2tile(min_coord, zoom);
+  const auto max_tile = coord2tile(max_coord, zoom);
   logger::debug("[osm_map] min: ({} {}), max: ({} {})",
                 min_tile.x, min_tile.y, max_tile.x, max_tile.y);
 
@@ -97,19 +107,19 @@ auto osm_map::load_tiles(
   //   (max_tile.x - min_tile.x + 1)*tile_size,
   //   (max_tile.y - min_tile.y * 1)*tile_size
   // };
-  const auto coord2pos = [&](dvec2 coord) -> vec2 {
-    const float lat = coord.x;
-    const float lng = coord.y;
-    ivec2 map_sz = max_tile-min_tile;
-    map_sz *= tile_size;
-    const auto min_pos = tile2coord(min_tile, zoom);
-    const auto max_pos = tile2coord(max_tile, zoom);
-
-    const float x = map_sz.y*(lng-min_pos.y)/(max_pos.y-min_pos.y);
-    const float y = map_sz.x*(lat-min_pos.x)/(max_pos.x-min_pos.x);
-    logger::debug(" =>> ({}, {})", x, y);
-    return {x, y};
-  };
+  // const auto coord2pos = [&](dvec2 coord) -> vec2 {
+  //   const float lat = coord.x;
+  //   const float lng = coord.y;
+  //   ivec2 map_sz = max_tile-min_tile;
+  //   map_sz *= tile_size;
+  //   const auto min_pos = tile2coord(min_tile, zoom);
+  //   const auto max_pos = tile2coord(max_tile, zoom);
+  //
+  //   const float x = map_sz.y*(lng-min_pos.y)/(max_pos.y-min_pos.y);
+  //   const float y = map_sz.x*(lat-min_pos.x)/(max_pos.x-min_pos.x);
+  //   logger::debug(" =>> ({}, {})", x, y);
+  //   return {x, y};
+  // };
 
   if (!fs::exists(_cache)) {
     logger::info("Creating tile cache directory \"{}\"", _cache.c_str());
@@ -117,12 +127,22 @@ auto osm_map::load_tiles(
       logger::warning("Failed to create cache directory!!!");
     }
   }
+  constexpr float TILE_SIZE = static_cast<float>(osm_tileset::TILE_SIZE);
+  const vec2 tileset_sz {
+    (max_tile.x - min_tile.x) * TILE_SIZE,
+    (max_tile.y - min_tile.y) * TILE_SIZE
+  }; //in world space
+  logger::debug("TILESET: {}x{}", tileset_sz.x, tileset_sz.y);
   
-  std::vector<tile_data> tiles;
+  std::vector<osm_tileset::tile_t> tiles;
   tiles.reserve(tile_count);
+
   for (int32 tile_x = min_tile.x; tile_x <= max_tile.x; ++tile_x) {
     for (int32 tile_y = min_tile.y; tile_y <= max_tile.y; ++tile_y) {
-      const dvec2 coord = tile2coord({tile_x, tile_y}, zoom);
+      const vec2 world_pos{
+        (tile_x-min_tile.x+QUAD_CORRECTION)*TILE_SIZE,
+        (tile_y-min_tile.y+QUAD_CORRECTION)*-TILE_SIZE
+      };
       const auto filename = fmt::format("osm-{}_{}_{}.png", zoom, tile_x, tile_y);
       const fs::path file = _cache / filename;
       const bool exists = fs::exists(file);
@@ -136,10 +156,11 @@ auto osm_map::load_tiles(
           continue;
         }
       }
-      tiles.emplace_back(ntf::load_image<ntf::uint8>(file.string()).value(), coord2pos(coord));
+      tiles.emplace_back(ntf::load_image<ntf::uint8>(file.string()).value(), world_pos);
     }
   }
-  return tiles;
+  // Convert the tiles again to clamp set the gps coordinate at the corner of the tile
+  return {std::move(tiles), tile2coord(min_tile, zoom), tile2coord(max_tile, zoom), tileset_sz};
 }
 
 auto osm_map::query_gps() -> gps_query {
