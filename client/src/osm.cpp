@@ -11,7 +11,7 @@ namespace curlopts = curlpp::Options;
 static const char* CURL_UA =
   "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0";
 
-static std::string format_osm_url(ivec2 tile, uint32 zoom) {
+static std::string format_osm_url(tile_coord tile, uint32 zoom) {
   return fmt::format("https://tile.openstreetmap.org/{}/{}/{}.png",
                      zoom, tile.x, tile.y);
 }
@@ -65,8 +65,7 @@ static bool download_string(std::string_view url, std::string& contents) {
   return false;
 }
 
-static constexpr float QUAD_CORRECTION = .5f;
-
+// https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Common_programming_languages
 static tile_coord coord2tile(gps_coord coord, uint32 zoom) {
   const auto lat = glm::radians(coord.x);
   const auto n = static_cast<float>(int{1 << zoom});
@@ -87,8 +86,9 @@ osm_tileset::osm_tileset(std::vector<tile_t>&& tiles, vec2 min_coord,
   _tiles{std::move(tiles)}, _min_coord{min_coord}, _max_coord{max_coord}, _size{size} {}
 
 vec2 osm_tileset::pos_from_coord(gps_coord coord) const {
-  const float x = (_size.x*(coord.x-_min_coord.x)/(_max_coord.x-_min_coord.x));
-  const float y = -(_size.y*(coord.y-_min_coord.y)/(_max_coord.y-_min_coord.y));
+  // In world space, lat maps to y and lng to x
+  const float x = _size.x*(coord.y-_min_coord.y)/(_max_coord.y-_min_coord.y);
+  const float y = _size.y*(coord.x-_min_coord.x)/(_max_coord.x-_min_coord.x);
   return {x, y};
 }
 
@@ -103,23 +103,6 @@ osm_tileset osm_map::load_tiles(gps_coord min_coord, gps_coord max_coord, uint32
 
   const uint32 tile_count = (1 + max_tile.x - min_tile.x)*(1 + max_tile.y - min_tile.y);
   logger::info("[osm_map] Fetching {} tiles!", tile_count);
-  // const ivec2 pixels {
-  //   (max_tile.x - min_tile.x + 1)*tile_size,
-  //   (max_tile.y - min_tile.y * 1)*tile_size
-  // };
-  // const auto coord2pos = [&](dvec2 coord) -> vec2 {
-  //   const float lat = coord.x;
-  //   const float lng = coord.y;
-  //   ivec2 map_sz = max_tile-min_tile;
-  //   map_sz *= tile_size;
-  //   const auto min_pos = tile2coord(min_tile, zoom);
-  //   const auto max_pos = tile2coord(max_tile, zoom);
-  //
-  //   const float x = map_sz.y*(lng-min_pos.y)/(max_pos.y-min_pos.y);
-  //   const float y = map_sz.x*(lat-min_pos.x)/(max_pos.x-min_pos.x);
-  //   logger::debug(" =>> ({}, {})", x, y);
-  //   return {x, y};
-  // };
 
   if (!fs::exists(_cache)) {
     logger::info("Creating tile cache directory \"{}\"", _cache.c_str());
@@ -129,14 +112,16 @@ osm_tileset osm_map::load_tiles(gps_coord min_coord, gps_coord max_coord, uint32
   }
   constexpr float TILE_SIZE = static_cast<float>(osm_tileset::TILE_SIZE);
   const vec2 tileset_sz {
-    (max_tile.x - min_tile.x) * TILE_SIZE,
-    (max_tile.y - min_tile.y) * TILE_SIZE
+    (max_tile.x - min_tile.x) *  TILE_SIZE,
+    (max_tile.y - min_tile.y) * -TILE_SIZE // Negate to match opengl coordinates
   }; //in world space
   logger::debug("TILESET: {}x{}", tileset_sz.x, tileset_sz.y);
   
   std::vector<osm_tileset::tile_t> tiles;
   tiles.reserve(tile_count);
 
+  // The rendering quad is centered at (0,0) instead of (.5, .5)
+  constexpr float QUAD_CORRECTION = .5f;
   for (int32 tile_x = min_tile.x; tile_x <= max_tile.x; ++tile_x) {
     for (int32 tile_y = min_tile.y; tile_y <= max_tile.y; ++tile_y) {
       const vec2 world_pos{

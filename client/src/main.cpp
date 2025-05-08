@@ -22,7 +22,7 @@
 //
 static gps_coord map_min{-24.737526, -65.394627}; // top left
 static gps_coord map_max{-24.744542, -65.387117}; // bottom right
-static uint32 map_zoom = 18u;
+static uint32 map_zoom = 19u;
 
 static const char* cache_dir = "tile_cache/";
 static const char* nodemcu_url = "http://192.168.89.53:80";
@@ -77,7 +77,7 @@ int main(int argc, const char* argv[]) {
 
   osm_map map{cache_dir};
   std::vector<map_object> objs;
-  gps_coord cino_coord{-24.739718, -65.391220};
+  gps_coord cino_coord{-24.741087, -65.389729};
   {
     const auto tileset = map.load_tiles(map_min, map_max, map_zoom);
     objs.reserve(tileset.tiles().size()+1u);
@@ -94,7 +94,7 @@ int main(int argc, const char* argv[]) {
     logger::debug("CINO: {} {}", cino_pos.x, cino_pos.y);
     objs.emplace_back(render.make_texture(marker_data), ntf::transform2d<float>{}
       .pos(cino_pos).scale(64.f));
-    render.cam_pos(cino_pos.x, cino_pos.y);
+    // render.cam_pos(cino_pos.x, cino_pos.y);
   }
 
 

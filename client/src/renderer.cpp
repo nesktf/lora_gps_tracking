@@ -67,7 +67,7 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
     .attribs = attr_desc,
     .stages = stages,
     .primitive = ntf::r_primitive::triangles,
-    .poly_mode = ntf::r_polygon_mode::fill,
+    .poly_mode = ntf::r_polygon_mode::line,
     .poly_width = ntf::nullopt,
     .stencil_test = nullptr,
     .depth_test = nullptr,
