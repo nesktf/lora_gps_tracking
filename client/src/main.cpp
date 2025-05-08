@@ -52,6 +52,8 @@ int main(int argc, const char* argv[]) {
 
   auto& render = init_renderer();
   render.cam_pos(0.f, 0.f);
+  vec2 mouse_pos{};
+  vec2 mouse_delta{};
   render.window().set_key_press_callback([&](auto& win, const ntf::win_key_data& key) {
     auto cam_pos = render.cam_pos();
     if (key.action == ntf::win_action::press) {
@@ -70,15 +72,17 @@ int main(int argc, const char* argv[]) {
       }
     }
     render.cam_pos(cam_pos.x, cam_pos.y);
-  });
-  render.window().set_viewport_callback([&](auto&, const ntf::extent2d& ext) {
+  }).set_viewport_callback([&](auto&, const ntf::extent2d& ext) {
     render.update_viewport(ext.x, ext.y);
+  }).set_cursor_pos_callback([&](auto&, dvec2 pos) {
+    auto old = mouse_pos;
+    mouse_pos = render.raycast(pos.x, pos.y);
+    mouse_delta = mouse_pos - old;
   });
 
   osm_map map{cache_dir};
   std::vector<map_object> objs;
   gps_coord cino_coord{-24.741087, -65.389729};
-  {
     const auto tileset = map.load_tiles(map_min, map_max, map_zoom);
     objs.reserve(tileset.tiles().size()+1u);
 
@@ -95,11 +99,21 @@ int main(int argc, const char* argv[]) {
     objs.emplace_back(render.make_texture(marker_data), ntf::transform2d<float>{}
       .pos(cino_pos).scale(64.f));
     // render.cam_pos(cino_pos.x, cino_pos.y);
-  }
+
+  render.window().set_button_press_callback([&](auto&, const ntf::win_button_data& butt) {
+    if (butt.action == ntf::win_action::press) {
+      if (butt.button == ntf::win_button::m1) {
+        auto coso = tileset.coord_from_pos(mouse_pos);
+        logger::debug("LCLICK! {}, {}", coso.x, coso.y);
+      } else if (butt.button == ntf::win_button::m2) {
+        logger::debug("RCLICK! {}, {}", mouse_delta.x, mouse_delta.y);
+      }
+    }
+  });
 
 
   auto query = map.query_gps();
-  render.start_loop([&](float) {
+  render.start_loop([&](float dt) {
     auto& cino = objs.back().transform;
     auto cam_pos = render.cam_pos();
     render.render_string(100.f, 500.f, 1.f, query.info);
@@ -109,6 +123,13 @@ int main(int argc, const char* argv[]) {
     render.render_text(100.f, 300.f, 1.f, "cino_pos {:.2f},{:.2f}", cino.pos_x(), cino.pos_y());
     for (auto& obj : objs) {
       render.render_texture(obj.tex, obj.transform.world());
+    }
+    if (render.window().poll_button(ntf::win_button::m1) == ntf::win_action::press) {
+      logger::debug("RCLICK! {}, {}", mouse_delta.x, mouse_delta.y);
+      cam_pos += mouse_delta*-100.f*dt;
+      cam_pos.x = glm::clamp(cam_pos.x, 850.f, 3000.f);
+      cam_pos.y = glm::clamp(cam_pos.y, -3000.f, -450.f);
+      render.cam_pos(cam_pos.x, cam_pos.y);
     }
   });
   render_ctx::destroy();

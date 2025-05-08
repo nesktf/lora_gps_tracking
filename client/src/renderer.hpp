@@ -19,7 +19,7 @@ private:
   render_ctx(ntf::renderer_window&& win, ntf::renderer_context&& render,
              ntf::quad_mesh&& quad, ntf::renderer_pipeline&& tile_pipeline,
              ntf::font_renderer&& frenderer, ntf::sdf_text_rule&& frule,
-             const ntf::mat4& proj, const ntf::mat4& view, vec2 cam_origin);
+             const ntf::mat4& proj, ntf::extent2d viewport);
 
 public:
   static render_ctx& construct(std::string_view tile_vert_src, std::string_view tile_frag_src,
@@ -36,6 +36,8 @@ public:
     _gen_view();
   }
   vec2 cam_pos() const { return _cam_pos; }
+
+  vec2 raycast(float x, float y) const;
 
 public:
   ntf::renderer_window& window() { return _win; }
@@ -72,11 +74,14 @@ private:
   ntf::renderer_pipeline _tile_pipeline;
   ntf::font_renderer _frenderer;
   ntf::sdf_text_rule _frule;
-  ntf::mat4 _proj, _view;
-  ntf::text_buffer _text_buff;
-  std::vector<ntf::renderer_texture> _texs;
+
+  ntf::extent2d _vp;
+  ntf::mat4 _proj, _inv_proj, _view;
   vec2 _cam_pos;
   vec2 _cam_origin;
+
+  ntf::text_buffer _text_buff;
+  std::vector<ntf::renderer_texture> _texs;
 
 private:
   friend ntf::singleton<render_ctx>;

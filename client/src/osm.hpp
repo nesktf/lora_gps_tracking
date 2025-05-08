@@ -28,6 +28,7 @@ public:
 
 public:
   vec2 pos_from_coord(gps_coord coord) const;
+  gps_coord coord_from_pos(vec2 pos) const;
 
   gps_coord min_coord() const { return _min_coord; }
   gps_coord max_coord() const { return _max_coord;}

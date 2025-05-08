@@ -1,13 +1,14 @@
 #include "renderer.hpp"
 
 render_ctx::render_ctx(ntf::renderer_window&& win, ntf::renderer_context&& render,
-                   ntf::quad_mesh&& quad, ntf::renderer_pipeline&& quad_pipeline,
-                   ntf::font_renderer&& frenderer, ntf::sdf_text_rule&& frule,
-                   const ntf::mat4& proj, const ntf::mat4& view, vec2 cam_origin) :
+                       ntf::quad_mesh&& quad, ntf::renderer_pipeline&& quad_pipeline,
+                       ntf::font_renderer&& frenderer, ntf::sdf_text_rule&& frule,
+                       const ntf::mat4& proj, ntf::extent2d viewport) :
   _win{std::move(win)}, _ctx{std::move(render)},
   _quad{std::move(quad)}, _tile_pipeline{std::move(quad_pipeline)},
   _frenderer{std::move(frenderer)}, _frule{std::move(frule)},
-  _proj{proj}, _view{view}, _cam_pos{0.f, 0.f}, _cam_origin{cam_origin} {}
+  _vp{viewport}, _proj{proj}, _inv_proj{glm::inverse(proj)},
+  _cam_pos{0.f, 0.f}, _cam_origin{(float)viewport.x / 2.f, (float)viewport.y / 2.f} {_gen_view();}
 
 render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_view tile_frag_src,
                                   ntf::font_atlas_data&& font_atlas, ntf::extent2d win_sz) {
@@ -67,7 +68,7 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
     .attribs = attr_desc,
     .stages = stages,
     .primitive = ntf::r_primitive::triangles,
-    .poly_mode = ntf::r_polygon_mode::line,
+    .poly_mode = ntf::r_polygon_mode::fill,
     .poly_width = ntf::nullopt,
     .stencil_test = nullptr,
     .depth_test = nullptr,
@@ -80,8 +81,6 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
 
   vec2 cam_origin {win_sz.x*.5f, win_sz.y*.5f};
   ntf::mat4 proj_mat = glm::ortho(0.f, (float)win_sz.x, 0.f, (float)win_sz.y);
-  ntf::mat4 view_mat = ntf::build_view_matrix(vec2{0.f, 0.f}, cam_origin,
-                                              vec2{1.f, 1.f}, ntf::vec3{0.f, 0.f, 0.f});
   auto sdf_rule = ntf::sdf_text_rule::create(*rctx, proj_mat,
                                              ntf::color3{.9f, .9f, .9f}, 0.5f, 0.05f,
                                              ntf::color3{0.f, 0.f, 0.f},
@@ -92,7 +91,7 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
   return _construct(std::move(*win), std::move(*rctx),
                     std::move(quad), std::move(pip),
                     std::move(frenderer), std::move(sdf_rule),
-                    proj_mat, view_mat, cam_origin);
+                    proj_mat, win_sz);
 }
 
 void render_ctx::_on_render([[maybe_unused]] float dt) {
@@ -152,7 +151,10 @@ void render_ctx::render_texture(size_t tex, const ntf::mat4& transf) {
 
 void render_ctx::update_viewport(ntf::uint32 w, ntf::uint32 h) {
   ntf::renderer_framebuffer::default_fbo(_ctx).viewport({0, 0, w, h});
+  _vp.x = w;
+  _vp.y = h;
   _proj = glm::ortho(0.f, (float)w, 0.f, (float)h);
+  _inv_proj = glm::inverse(_proj);
   _cam_origin.x = w*.5f;
   _cam_origin.y = h*.5f;
   _gen_view();
@@ -160,6 +162,14 @@ void render_ctx::update_viewport(ntf::uint32 w, ntf::uint32 h) {
 }
 
 void render_ctx::_gen_view() {
-  _view = ntf::build_view_matrix(_cam_pos, _cam_origin,
-                                 vec2{1.f, 1.f}, ntf::vec3{0.f, 0.f, 0.f});
+  _view = ntf::build_view_matrix(_cam_pos, _cam_origin, vec2{1.f, 1.f}, ntf::vec3{0.f, 0.f, 0.f});
+}
+
+vec2 render_ctx::raycast(float x, float y) const {
+  const auto pos = _inv_proj*ntf::vec4{
+    (2.f*x) / (float)_vp.x - 1.f,
+    (1.f - (2.f*y)) / (float)_vp.y,
+    -1.f, 0.f
+  };
+  return {pos.x + _cam_pos.x, pos.y + _cam_pos.y + _vp.y*.5f};
 }

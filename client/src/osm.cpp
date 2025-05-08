@@ -87,9 +87,14 @@ osm_tileset::osm_tileset(std::vector<tile_t>&& tiles, vec2 min_coord,
 
 vec2 osm_tileset::pos_from_coord(gps_coord coord) const {
   // In world space, lat maps to y and lng to x
-  const float x = _size.x*(coord.y-_min_coord.y)/(_max_coord.y-_min_coord.y);
-  const float y = _size.y*(coord.x-_min_coord.x)/(_max_coord.x-_min_coord.x);
-  return {x, y};
+  const float fac_x = _size.x/(_max_coord.y-_min_coord.y);
+  const float fac_y = _size.y/(_max_coord.x-_min_coord.x);
+  return {fac_x*(coord.y-_min_coord.y), fac_y*(coord.x-_min_coord.x)};
+}
+gps_coord osm_tileset::coord_from_pos(vec2 pos) const {
+  const float fac_lat = (_max_coord.x-_min_coord.x)/_size.y;
+  const float fac_lng = (_max_coord.y-_min_coord.y)/_size.x;
+  return {pos.y*fac_lat + _min_coord.x, pos.x*fac_lng + _min_coord.y};
 }
 
 osm_map::osm_map(fs::path cache_path) :
