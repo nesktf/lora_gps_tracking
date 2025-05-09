@@ -14,14 +14,6 @@ struct map_object {
   ntf::transform2d<float> transform;
 };
 
-static auto& init_renderer() {
-  auto vert_src = ntf::file_contents("res/shader/tile.vs.glsl").value(); 
-  auto frag_src = ntf::file_contents("res/shader/tile.fs.glsl").value();
-  auto font_atlas = ntf::load_font_atlas<char>("res/font/CousineNerdFont-Regular.ttf").value();
-  return render_ctx::construct(vert_src, frag_src, std::move(font_atlas), {1280, 720});
-}
-
-
 int main(int argc, const char* argv[]) {
   logger::set_level(ntf::log_level::verbose);
   if (argc >= 2) {
@@ -33,12 +25,23 @@ int main(int argc, const char* argv[]) {
   logger::info("[main] Tile cache dir: \"{}\"", cache_dir);
   logger::info("[main] NodeMCU API url: \"{}\"", nodemcu_url);
 
-  auto& render = init_renderer();
+  {
+    auto vert_src = ntf::file_contents("res/shader/tile.vs.glsl").value(); 
+    auto frag_src = ntf::file_contents("res/shader/tile.fs.glsl").value();
+    auto font_atlas = ntf::load_font_atlas<char>("res/font/CousineNerdFont-Regular.ttf").value();
+    render_ctx::construct(vert_src, frag_src, std::move(font_atlas), {1280, 720});
+  }
+  auto& render = render_ctx::instance();
   render.cam_pos(1280.f, -1280.f);
+
   auto sdf = gps_marker::make_marker(10.f, 100.f);
   auto sdf2 = map_shape::make_shape(map_shape::S_TRIANGLE, 50.f, color4{0.f, 1.f, 1.f, 1.f});
+  auto sdf3 = map_shape::make_shape(map_shape::S_TRIANGLE, 20.f, color4{1.f, 0.f, 0.f, 1.f});
+  auto sdf4 = map_shape::make_shape(map_shape::S_SQUARE, 15.f, color4{1.f, 0.f, 0.f, 1.f});
   sdf2.set_outline_color(color4{1.f, 0.f, 0.f, 1.f});
   sdf2.set_pos({1280, -1280});
+
+  // bezier_thing bez{};
 
   vec2 mouse_pos{};
   render.window().set_key_press_callback([&](auto& win, const ntf::win_key_data& key) {
@@ -105,10 +108,27 @@ int main(int argc, const char* argv[]) {
     [&](uint32 ups) {
       const float dt = 1/static_cast<float>(ups);
       auto cam_pos = render.cam_pos();
+      auto& cino = objs.back();
+      const auto mouse_world = render.raycast(mouse_pos.x, -mouse_pos.y);
+      sdf.set_pos(mouse_world);
+
       const auto mouse_delta = (mouse_pos - last_mouse_pos)*dt;
 
+      const auto dir = glm::normalize(cino.transform.pos()-sdf.pos());
+      const vec2 up{0.f, 1.f};
+
+      float angle = glm::acos(glm::dot(dir, up));
+      if (dir.x >= 0.f){
+        angle *= -1.f;
+      }
+      sdf3.set_pos(mouse_world + dir*100.f);
+      sdf3.set_rot(angle+M_PIf);
+      sdf4.set_pos(mouse_world + dir*70.f);
+      sdf4.set_rot(angle+M_PIf);
+      // cino.transform.pos(mouse_world + dir*100.f);
+      // cino.transform.rot(0.f, 0.f, angle);
+
       if (render.window().poll_button(ntf::win_button::m1) == ntf::win_action::press) {
-        logger::debug("RCLICK! {}, {}", mouse_delta.x, mouse_delta.y);
         cam_pos += mouse_delta*-60.f;
         cam_pos.x = glm::clamp(cam_pos.x, 850.f, 3000.f);
         cam_pos.y = glm::clamp(cam_pos.y, -3000.f, -450.f);
@@ -139,8 +159,11 @@ int main(int argc, const char* argv[]) {
       for (auto& obj : objs) {
         render.render_texture(obj.tex, obj.transform.world());
       }
-      render.render_thing(sdf);
       render.render_thing(sdf2);
+      render.render_thing(sdf);
+      render.render_thing(sdf4);
+      render.render_thing(sdf3);
+      // render.render_thing(bez);
 
       render.end_render();
     },

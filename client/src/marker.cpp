@@ -43,19 +43,6 @@ ntf::r_pipeline map_shape::retrieve_uniforms(ntf::uniform_list& list) {
   return pip.handle();
 }
 
-
-static constexpr std::string_view vert_src = R"glsl(
-#version 460 core
-
-layout (location = 0) in vec3 att_coords;
-layout (location = 1) in vec3 att_normals;
-layout (location = 2) in vec2 att_texcoords;
-
-void main() {
-  gl_Position = vec4(att_coords.x*2.f, att_coords.y*2.f, att_coords.z*2.f, 1.f);
-}
-)glsl";
-
 static constexpr std::string_view frag_gps_marker = R"glsl(
 #version 460 core
 
@@ -175,13 +162,13 @@ void main() {
 )glsl";
 
 gps_marker gps_marker::make_marker(float size, float radius) {
-  auto pip = render_ctx::instance().make_pipeline(vert_src, frag_gps_marker);
+  auto pip = render_ctx::instance().make_pipeline(vert_frag_only_src, frag_gps_marker);
   return gps_marker{pip, size, radius};
 }
 
 map_shape map_shape::make_shape(shape_enum shape, float size, const color4& color)
 {
-  auto pip = render_ctx::instance().make_pipeline(vert_src, frag_shape);
+  auto pip = render_ctx::instance().make_pipeline(vert_frag_only_src, frag_shape);
   switch (shape) {
     case shape_enum::S_CIRCLE: {
       return map_shape{pip, color, 0.f, size, 0.f};

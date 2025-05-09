@@ -17,6 +17,8 @@ using ntf::color4;
 
 using pipeline_t = size_t;
 
+extern std::string_view vert_frag_only_src;
+
 class render_ctx : public ntf::singleton<render_ctx> {
 private:
   render_ctx(ntf::renderer_window&& win, ntf::renderer_context&& render,

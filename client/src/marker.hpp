@@ -16,6 +16,9 @@ public:
   void set_radius(float radius) { _pres_rad = radius; }
   void set_size(float size) { _point_rad = size; }
 
+public:
+  vec2 pos() const { return _pos; }
+
 private:
   pipeline_t _pipeline;
   float _point_rad, _pres_rad;
@@ -47,10 +50,25 @@ public:
   void set_color(const color4& col) { _color = col; }
   void set_outline_color(const color4& col) { _color_out = col; }
   void set_outline_width(float width) { _out_width = width; }
+  void set_rot(float rot) { _rot = rot; }
+
+public:
+  vec2 pos() const { return _pos; }
 
 private:
   pipeline_t _pipeline;
   color4 _color, _color_out;
   float _nsides, _radius, _rot, _out_width;
   vec2 _pos;
+};
+
+class bezier_thing : public ntf::rendering_rule {
+public:
+  bezier_thing(pipeline_t pipeline);
+
+public:
+  ntf::r_pipeline retrieve_uniforms(ntf::uniform_list& list) override;
+
+public:
+  pipeline_t _pipeline;
 };
