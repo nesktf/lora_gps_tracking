@@ -46,13 +46,14 @@ public:
 public:
   void render_thing(ntf::rendering_rule& rule);
 
+  void start_render();
+  void end_render();
+
 public:
   ntf::renderer_window& window() { return _win; }
   ntf::renderer_context& ctx() { return _ctx; }
 
 private:
-  void _prep_render();
-  void _on_render(float dt);
   void _gen_view();
 
 public:
@@ -67,12 +68,8 @@ public:
 
 public:
   template<typename F>
-  void start_loop(F&& fun) {
-    ntf::shogle_render_loop(_win, _ctx, [&](float dt){
-      _prep_render();
-      fun(dt);
-      _on_render(dt);
-    });
+  void start_loop(const uint32& ups, F&& fun) {
+    ntf::shogle_render_loop(_win, _ctx, ups, std::forward<F>(fun));
   }
 
 public:

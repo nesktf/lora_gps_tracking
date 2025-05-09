@@ -95,7 +95,13 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
                     proj_mat, win_sz);
 }
 
-void render_ctx::_on_render([[maybe_unused]] float dt) {
+void render_ctx::start_render() {
+  _text_buff.clear();
+  _uniform_cache.clear();
+  _uniform_offset = 0u;
+}
+
+void render_ctx::end_render() {
   auto fbo = ntf::renderer_framebuffer::default_fbo(_ctx);
   _frenderer.clear_state();
   _frenderer.append_text(_text_buff);
@@ -211,12 +217,6 @@ pipeline_t render_ctx::make_pipeline(std::string_view vert_src, std::string_view
   }).value());
 
   return _pips.size()-1u;
-}
-
-void render_ctx::_prep_render() {
-  _text_buff.clear();
-  _uniform_cache.clear();
-  _uniform_offset = 0u;
 }
 
 void render_ctx::render_thing(ntf::rendering_rule& rule) {
