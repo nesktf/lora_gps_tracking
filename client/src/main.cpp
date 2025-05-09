@@ -163,6 +163,8 @@ int main(int argc, const char* argv[]) {
       render.render_thing(sdf);
       render.render_thing(sdf4);
       render.render_thing(sdf3);
+      render.render_text(mouse_pos.x-180.f, 50.f+mouse_pos.y+render.viewport().y, 1.f,
+                         "BAKA DETECTED");
       // render.render_thing(bez);
 
       render.end_render();

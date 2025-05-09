@@ -35,6 +35,7 @@ public:
   pipeline_t make_pipeline(std::string_view vert, std::string_view frag);
   void render_texture(size_t tex, const ntf::mat4& transf);
   void update_viewport(ntf::uint32 w, ntf::uint32 h);
+  vec2 viewport() const { return _vp; }
 
   void cam_pos(float x, float y) {
     _cam_pos.x = x;
