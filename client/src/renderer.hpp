@@ -13,10 +13,9 @@ using ntf::int32;
 using ntf::ivec2;
 using ntf::dvec2;
 using ntf::vec2;
+using ntf::color4;
 
-struct rendering_rule {
-  virtual size_t append_uniforms(ntf::uniform_list& list) = 0;
-};
+using pipeline_t = size_t;
 
 class render_ctx : public ntf::singleton<render_ctx> {
 private:
@@ -31,7 +30,7 @@ public:
 
 public:
   size_t make_texture(const ntf::image_data& image);
-  auto make_pipeline(std::string_view vert, std::string_view frag) -> std::pair<size_t, ntf::r_pipeline_view>;
+  pipeline_t make_pipeline(std::string_view vert, std::string_view frag);
   void render_texture(size_t tex, const ntf::mat4& transf);
   void update_viewport(ntf::uint32 w, ntf::uint32 h);
 
@@ -45,7 +44,7 @@ public:
   vec2 raycast(float x, float y) const;
 
 public:
-  void render_thing(rendering_rule& rule);
+  void render_thing(ntf::rendering_rule& rule);
 
 public:
   ntf::renderer_window& window() { return _win; }
@@ -79,6 +78,7 @@ public:
 public:
   const ntf::mat4& get_proj() const { return _proj; }
   const ntf::mat4& get_view() const { return _view; }
+  ntf::r_pipeline_view get_pipeline(pipeline_t idx) const { return _pips[idx].handle(); } 
 
 private:
   ntf::renderer_window _win;

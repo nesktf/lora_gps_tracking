@@ -175,9 +175,7 @@ vec2 render_ctx::raycast(float x, float y) const {
   return {pos.x + _cam_pos.x, pos.y + _cam_pos.y + _vp.y*.5f};
 }
 
-auto render_ctx::make_pipeline(
-  std::string_view vert_src, std::string_view frag_src
-) -> std::pair<size_t, ntf::r_pipeline_view> {
+pipeline_t render_ctx::make_pipeline(std::string_view vert_src, std::string_view frag_src) {
   auto vert = ntf::renderer_shader::create(_ctx, {
     .type = ntf::r_shader_type::vertex,
     .source = {vert_src},
@@ -211,7 +209,8 @@ auto render_ctx::make_pipeline(
     .face_culling = nullptr,
     .blending = blending,
   }).value());
-  return std::make_pair(_pips.size()-1, ntf::r_pipeline_view{_pips.back().handle()});
+
+  return _pips.size()-1u;
 }
 
 void render_ctx::_prep_render() {
@@ -220,10 +219,10 @@ void render_ctx::_prep_render() {
   _uniform_offset = 0u;
 }
 
-void render_ctx::render_thing(rendering_rule& rule) {
+void render_ctx::render_thing(ntf::rendering_rule& rule) {
   auto fbo = ntf::renderer_framebuffer::default_fbo(_ctx);
   const size_t last_sz = _uniform_cache.size();
-  const auto& pip = _pips[rule.append_uniforms(_uniform_cache)];
+  const auto pip = rule.retrieve_uniforms(_uniform_cache);
   const size_t uniform_count = (_uniform_cache.size()-last_sz);
   NTF_ASSERT(uniform_count);
 
@@ -233,7 +232,7 @@ void render_ctx::render_thing(rendering_rule& rule) {
   };
   _ctx.submit_command({
     .target = fbo.handle(),
-    .pipeline = pip.handle(),
+    .pipeline = pip,
     .buffers = bbinds,
     .textures = {},
     .uniforms = {_uniform_cache.data()+_uniform_offset, uniform_count},

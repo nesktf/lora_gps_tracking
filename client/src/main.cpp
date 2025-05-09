@@ -1,28 +1,10 @@
 #include "renderer.hpp"
 #include "osm.hpp"
-//
-// ntf::thread_pool threadpool;
-// std::atomic<bool> should_die{false};
-// std::atomic<bool> new_data{false};
-// bool nodemcu_connected{false};
-//
-// osm::gps_data gps_data;
-// std::mutex gps_mtx;
-//
-// std::chrono::high_resolution_clock::time_point last_update;
-//
-// std::vector<std::pair<std::string, ntf::transform2d>> texts {
-//   {"conn:", ntf::transform2d{}.pos(25, -250)},
-//   {"avail:", ntf::transform2d{}.pos(25, -200)},
-//   {"lat:", ntf::transform2d{}.pos(25, -150)},
-//   {"lng:", ntf::transform2d{}.pos(25, -100)},
-//   {"sat:", ntf::transform2d{}.pos(25, -50)},
-//   {"last update:", ntf::transform2d{}.pos(25, 50)},
-// };
-//
+#include "marker.hpp"
+
 static gps_coord map_min{-24.737526, -65.394627}; // top left
 static gps_coord map_max{-24.744542, -65.387117}; // bottom right
-static uint32 map_zoom = 17u;
+static uint32 map_zoom = 19u;
 
 static const char* cache_dir = "tile_cache/";
 static const char* nodemcu_url = "http://192.168.89.53:80";
@@ -39,37 +21,6 @@ static auto& init_renderer() {
   return render_ctx::construct(vert_src, frag_src, std::move(font_atlas), {1280, 720});
 }
 
-class sdf_render : public rendering_rule {
-public:
-  sdf_render(size_t handle, ntf::r_pipeline_view pipeline,
-             float point_rad, float pres_rad) :
-    _handle{handle}, _pipeline{pipeline},
-    _point_rad{point_rad}, _pres_rad{pres_rad},
-    _pos{1280.f, -720.f} {}
-public:
-  void set_pos(vec2 pos) { _pos = pos; }
-  size_t append_uniforms(ntf::uniform_list& list) override {
-    const auto& view = render_ctx::instance().get_view();
-    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_point_rad"), _point_rad));
-    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_pres_rad"), _pres_rad));
-    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_pos"), _pos));
-    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_view"), view));
-    return _handle;
-  }
-
-public:
-  size_t _handle;
-  ntf::r_pipeline_view _pipeline;
-  float _point_rad, _pres_rad;
-  vec2 _pos;
-};
-
-static auto make_sdf_render() {
-  auto vert_src = ntf::file_contents("res/shader/marker.vs.glsl").value();
-  auto frag_src = ntf::file_contents("res/shader/marker.fs.glsl").value();
-  auto [handle, pipeline] = render_ctx::instance().make_pipeline(vert_src, frag_src);
-  return sdf_render{handle, pipeline, 10.f, 200.f};
-}
 
 int main(int argc, const char* argv[]) {
   logger::set_level(ntf::log_level::verbose);
@@ -84,7 +35,10 @@ int main(int argc, const char* argv[]) {
 
   auto& render = init_renderer();
   render.cam_pos(0.f, 0.f);
-  auto sdf = make_sdf_render();
+  auto sdf = gps_marker::make_marker(10.f, 100.f);
+  auto sdf2 = map_shape::make_shape(map_shape::S_TRIANGLE, 50.f, color4{0.f, 1.f, 1.f, 1.f});
+  sdf2.set_outline_color(color4{1.f, 0.f, 0.f, 1.f});
+  sdf2.set_pos({1280, -1280});
 
   vec2 mouse_pos{};
   vec2 mouse_delta{};
@@ -112,6 +66,12 @@ int main(int argc, const char* argv[]) {
     auto old = mouse_pos;
     mouse_pos = render.raycast(pos.x, pos.y);
     mouse_delta = mouse_pos - old;
+    if (ntf::collision2d(mouse_pos, 5.f, {1280, -1280}, 50.f)) {
+      sdf2.set_outline_width(10.f);
+    } else {
+      sdf2.set_outline_width(0.f);
+    }
+      
   });
 
   osm_map map{cache_dir};
@@ -160,6 +120,7 @@ int main(int argc, const char* argv[]) {
       render.render_texture(obj.tex, obj.transform.world());
     }
     render.render_thing(sdf);
+    render.render_thing(sdf2);
     if (render.window().poll_button(ntf::win_button::m1) == ntf::win_action::press) {
       logger::debug("RCLICK! {}, {}", mouse_delta.x, mouse_delta.y);
       cam_pos += mouse_delta*-100.f*dt;
@@ -170,6 +131,25 @@ int main(int argc, const char* argv[]) {
   });
   render_ctx::destroy();
 
+// ntf::thread_pool threadpool;
+// std::atomic<bool> should_die{false};
+// std::atomic<bool> new_data{false};
+// bool nodemcu_connected{false};
+//
+// osm::gps_data gps_data;
+// std::mutex gps_mtx;
+//
+// std::chrono::high_resolution_clock::time_point last_update;
+//
+// std::vector<std::pair<std::string, ntf::transform2d>> texts {
+//   {"conn:", ntf::transform2d{}.pos(25, -250)},
+//   {"avail:", ntf::transform2d{}.pos(25, -200)},
+//   {"lat:", ntf::transform2d{}.pos(25, -150)},
+//   {"lng:", ntf::transform2d{}.pos(25, -100)},
+//   {"sat:", ntf::transform2d{}.pos(25, -50)},
+//   {"last update:", ntf::transform2d{}.pos(25, 50)},
+// };
+//
   // osm::map map{"tile_cache/",
   //   osm::coord{-24.737526, -65.394627}, // top left
   //   osm::coord{-24.744542, -65.387117}, // bottom right
