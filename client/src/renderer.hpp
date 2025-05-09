@@ -14,6 +14,10 @@ using ntf::ivec2;
 using ntf::dvec2;
 using ntf::vec2;
 
+struct rendering_rule {
+  virtual size_t append_uniforms(ntf::uniform_list& list) = 0;
+};
+
 class render_ctx : public ntf::singleton<render_ctx> {
 private:
   render_ctx(ntf::renderer_window&& win, ntf::renderer_context&& render,
@@ -27,6 +31,7 @@ public:
 
 public:
   size_t make_texture(const ntf::image_data& image);
+  auto make_pipeline(std::string_view vert, std::string_view frag) -> std::pair<size_t, ntf::r_pipeline_view>;
   void render_texture(size_t tex, const ntf::mat4& transf);
   void update_viewport(ntf::uint32 w, ntf::uint32 h);
 
@@ -40,10 +45,14 @@ public:
   vec2 raycast(float x, float y) const;
 
 public:
+  void render_thing(rendering_rule& rule);
+
+public:
   ntf::renderer_window& window() { return _win; }
   ntf::renderer_context& ctx() { return _ctx; }
 
 private:
+  void _prep_render();
   void _on_render(float dt);
   void _gen_view();
 
@@ -61,11 +70,15 @@ public:
   template<typename F>
   void start_loop(F&& fun) {
     ntf::shogle_render_loop(_win, _ctx, [&](float dt){
-      _text_buff.clear();
+      _prep_render();
       fun(dt);
       _on_render(dt);
     });
   }
+
+public:
+  const ntf::mat4& get_proj() const { return _proj; }
+  const ntf::mat4& get_view() const { return _view; }
 
 private:
   ntf::renderer_window _win;
@@ -82,6 +95,9 @@ private:
 
   ntf::text_buffer _text_buff;
   std::vector<ntf::renderer_texture> _texs;
+  std::vector<ntf::renderer_pipeline> _pips;
+  ntf::uniform_list _uniform_cache;
+  size_t _uniform_offset;
 
 private:
   friend ntf::singleton<render_ctx>;

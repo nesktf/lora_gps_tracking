@@ -8,7 +8,8 @@ render_ctx::render_ctx(ntf::renderer_window&& win, ntf::renderer_context&& rende
   _quad{std::move(quad)}, _tile_pipeline{std::move(quad_pipeline)},
   _frenderer{std::move(frenderer)}, _frule{std::move(frule)},
   _vp{viewport}, _proj{proj}, _inv_proj{glm::inverse(proj)},
-  _cam_pos{0.f, 0.f}, _cam_origin{(float)viewport.x / 2.f, (float)viewport.y / 2.f} {_gen_view();}
+  _cam_pos{0.f, 0.f}, _cam_origin{(float)viewport.x / 2.f, (float)viewport.y / 2.f},
+  _uniform_offset{0u} {_gen_view();}
 
 render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_view tile_frag_src,
                                   ntf::font_atlas_data&& font_atlas, ntf::extent2d win_sz) {
@@ -54,7 +55,7 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
   }).value();
 
   const auto attr_desc = ntf::quad_mesh::attr_descriptor();
-  ntf::r_blend_opts blending {
+  const ntf::r_blend_opts blending {
     .mode = ntf::r_blend_mode::add,
     .src_factor = ntf::r_blend_factor::src_alpha,
     .dst_factor = ntf::r_blend_factor::inv_src_alpha,
@@ -172,4 +173,77 @@ vec2 render_ctx::raycast(float x, float y) const {
     -1.f, 0.f
   };
   return {pos.x + _cam_pos.x, pos.y + _cam_pos.y + _vp.y*.5f};
+}
+
+auto render_ctx::make_pipeline(
+  std::string_view vert_src, std::string_view frag_src
+) -> std::pair<size_t, ntf::r_pipeline_view> {
+  auto vert = ntf::renderer_shader::create(_ctx, {
+    .type = ntf::r_shader_type::vertex,
+    .source = {vert_src},
+  }).value();
+  auto frag = ntf::renderer_shader::create(_ctx, {
+    .type = ntf::r_shader_type::fragment,
+    .source = {frag_src},
+  }).value();
+
+  const ntf::r_blend_opts blending {
+    .mode = ntf::r_blend_mode::add,
+    .src_factor = ntf::r_blend_factor::src_alpha,
+    .dst_factor = ntf::r_blend_factor::inv_src_alpha,
+    .color = {0.f, 0.f, 0.f, 0.f},
+    .dynamic = false,
+  };
+
+  const auto attr_desc = ntf::quad_mesh::attr_descriptor();
+  const ntf::r_shader stages[] {vert.handle(), frag.handle()};
+  _pips.emplace_back(ntf::renderer_pipeline::create(_ctx, {
+    .attrib_binding = 0u,
+    .attrib_stride = sizeof(ntf::quad_mesh::attr_type),
+    .attribs = attr_desc,
+    .stages = stages,
+    .primitive = ntf::r_primitive::triangles,
+    .poly_mode = ntf::r_polygon_mode::fill,
+    .poly_width = ntf::nullopt,
+    .stencil_test = nullptr,
+    .depth_test = nullptr,
+    .scissor_test = nullptr,
+    .face_culling = nullptr,
+    .blending = blending,
+  }).value());
+  return std::make_pair(_pips.size()-1, ntf::r_pipeline_view{_pips.back().handle()});
+}
+
+void render_ctx::_prep_render() {
+  _text_buff.clear();
+  _uniform_cache.clear();
+  _uniform_offset = 0u;
+}
+
+void render_ctx::render_thing(rendering_rule& rule) {
+  auto fbo = ntf::renderer_framebuffer::default_fbo(_ctx);
+  const size_t last_sz = _uniform_cache.size();
+  const auto& pip = _pips[rule.append_uniforms(_uniform_cache)];
+  const size_t uniform_count = (_uniform_cache.size()-last_sz);
+  NTF_ASSERT(uniform_count);
+
+  const ntf::r_buffer_binding bbinds[] = {
+    {.buffer = _quad.vbo().handle(), .type = ntf::r_buffer_type::vertex, .location = {}},
+    {.buffer = _quad.ebo().handle(), .type = ntf::r_buffer_type::index, .location = {}},
+  };
+  _ctx.submit_command({
+    .target = fbo.handle(),
+    .pipeline = pip.handle(),
+    .buffers = bbinds,
+    .textures = {},
+    .uniforms = {_uniform_cache.data()+_uniform_offset, uniform_count},
+    .draw_opts = {
+      .count = 6,
+      .offset = 0,
+      .instances = 0,
+      .sort_group = 0
+    },
+    .on_render = {},
+  });
+  _uniform_offset = _uniform_offset + uniform_count;
 }

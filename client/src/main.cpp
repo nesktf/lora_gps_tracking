@@ -22,7 +22,7 @@
 //
 static gps_coord map_min{-24.737526, -65.394627}; // top left
 static gps_coord map_max{-24.744542, -65.387117}; // bottom right
-static uint32 map_zoom = 19u;
+static uint32 map_zoom = 17u;
 
 static const char* cache_dir = "tile_cache/";
 static const char* nodemcu_url = "http://192.168.89.53:80";
@@ -39,6 +39,38 @@ static auto& init_renderer() {
   return render_ctx::construct(vert_src, frag_src, std::move(font_atlas), {1280, 720});
 }
 
+class sdf_render : public rendering_rule {
+public:
+  sdf_render(size_t handle, ntf::r_pipeline_view pipeline,
+             float point_rad, float pres_rad) :
+    _handle{handle}, _pipeline{pipeline},
+    _point_rad{point_rad}, _pres_rad{pres_rad},
+    _pos{1280.f, -720.f} {}
+public:
+  void set_pos(vec2 pos) { _pos = pos; }
+  size_t append_uniforms(ntf::uniform_list& list) override {
+    const auto& view = render_ctx::instance().get_view();
+    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_point_rad"), _point_rad));
+    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_pres_rad"), _pres_rad));
+    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_pos"), _pos));
+    list.emplace_back(ntf::r_format_pushconst(*_pipeline.uniform("u_view"), view));
+    return _handle;
+  }
+
+public:
+  size_t _handle;
+  ntf::r_pipeline_view _pipeline;
+  float _point_rad, _pres_rad;
+  vec2 _pos;
+};
+
+static auto make_sdf_render() {
+  auto vert_src = ntf::file_contents("res/shader/marker.vs.glsl").value();
+  auto frag_src = ntf::file_contents("res/shader/marker.fs.glsl").value();
+  auto [handle, pipeline] = render_ctx::instance().make_pipeline(vert_src, frag_src);
+  return sdf_render{handle, pipeline, 10.f, 200.f};
+}
+
 int main(int argc, const char* argv[]) {
   logger::set_level(ntf::log_level::verbose);
   if (argc >= 2) {
@@ -52,6 +84,8 @@ int main(int argc, const char* argv[]) {
 
   auto& render = init_renderer();
   render.cam_pos(0.f, 0.f);
+  auto sdf = make_sdf_render();
+
   vec2 mouse_pos{};
   vec2 mouse_delta{};
   render.window().set_key_press_callback([&](auto& win, const ntf::win_key_data& key) {
@@ -98,6 +132,7 @@ int main(int argc, const char* argv[]) {
     logger::debug("CINO: {} {}", cino_pos.x, cino_pos.y);
     objs.emplace_back(render.make_texture(marker_data), ntf::transform2d<float>{}
       .pos(cino_pos).scale(64.f));
+    sdf.set_pos(cino_pos);
     // render.cam_pos(cino_pos.x, cino_pos.y);
 
   render.window().set_button_press_callback([&](auto&, const ntf::win_button_data& butt) {
@@ -124,6 +159,7 @@ int main(int argc, const char* argv[]) {
     for (auto& obj : objs) {
       render.render_texture(obj.tex, obj.transform.world());
     }
+    render.render_thing(sdf);
     if (render.window().poll_button(ntf::win_button::m1) == ntf::win_action::press) {
       logger::debug("RCLICK! {}, {}", mouse_delta.x, mouse_delta.y);
       cam_pos += mouse_delta*-100.f*dt;
