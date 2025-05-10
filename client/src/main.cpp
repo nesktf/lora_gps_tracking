@@ -34,12 +34,14 @@ int main(int argc, const char* argv[]) {
   auto& render = render_ctx::instance();
   render.cam_pos(1280.f, -1280.f);
 
-  auto sdf = gps_marker::make_marker(10.f, 100.f);
-  auto sdf2 = map_shape::make_shape(map_shape::S_TRIANGLE, 50.f, color4{0.f, 1.f, 1.f, 1.f});
-  auto sdf3 = map_shape::make_shape(map_shape::S_TRIANGLE, 20.f, color4{1.f, 0.f, 0.f, 1.f});
-  auto sdf4 = map_shape::make_shape(map_shape::S_SQUARE, 15.f, color4{1.f, 0.f, 0.f, 1.f});
-  sdf2.set_outline_color(color4{1.f, 0.f, 0.f, 1.f});
-  sdf2.set_pos({1280, -1280});
+  auto sdf = gps_marker::make_marker(10.f, 35.f);
+  // auto sdf2 = map_shape::make_shape(map_shape::S_TRIANGLE, 20.f, color4{0.f, 1.f, 1.f, 1.f});
+  auto sdf3 = map_shape::make_shape(map_shape::S_TRIANGLE, 7.f, color4{1.f, 0.f, 0.f, 1.f});
+  auto sdf4 = map_shape::make_shape(map_shape::S_SQUARE, 6.f, color4{1.f, 0.f, 0.f, 1.f});
+  // sdf2.set_outline_color(color4{1.f, 0.f, 0.f, 1.f});
+  // sdf2.set_pos({1280, -1280});
+  std::vector<map_shape> checkpoints;
+  size_t selected = 0u;
 
   // bezier_thing bez{};
 
@@ -59,6 +61,10 @@ int main(int argc, const char* argv[]) {
         cam_pos.x -= 256.f;
       } else if (key.key == ntf::win_key::right) {
         cam_pos.x += 256.f;
+      }
+      if (key.key == ntf::win_key::backspace) {
+        checkpoints.clear();
+        selected = 0u;
       }
     }
     render.cam_pos(cam_pos.x, cam_pos.y);
@@ -84,11 +90,11 @@ int main(int argc, const char* argv[]) {
   }
   auto marker_data = ntf::load_image<ntf::uint8>("res/cirno.png").value();
   // cino_coord = tileset.max_coord();
-  const auto cino_pos = tileset.pos_from_coord(cino_coord);
-  logger::debug("CINO: {} {}", cino_pos.x, cino_pos.y);
-  objs.emplace_back(render.make_texture(marker_data), ntf::transform2d<float>{}
-    .pos(cino_pos).scale(64.f));
-  sdf.set_pos(cino_pos);
+  // const auto cino_pos = tileset.pos_from_coord(cino_coord);
+  // logger::debug("CINO: {} {}", cino_pos.x, cino_pos.y);
+  // objs.emplace_back(render.make_texture(marker_data), ntf::transform2d<float>{}
+  //   .pos(cino_pos).scale(64.f));
+  // sdf.set_pos(cino_pos);
   // render.cam_pos(cino_pos.x, cino_pos.y);
 
   render.window().set_button_press_callback([&](auto&, const ntf::win_button_data& butt) {
@@ -97,34 +103,33 @@ int main(int argc, const char* argv[]) {
         auto coso = tileset.coord_from_pos(mouse_pos);
         logger::debug("LCLICK! {}, {}", coso.x, coso.y);
       }
+      if (butt.button == ntf::win_button::m2) {
+        auto wp = render.raycast(mouse_pos.x, -mouse_pos.y);
+        checkpoints.emplace_back(map_shape::make_shape(map_shape::S_DIAMOND, 7.f,
+                                                       color4{0.f, 1.f, 0.f, .75f}));
+        checkpoints.back().set_pos(wp);
+        checkpoints.back().set_outline_color(color4{1.f, 0.f, 0.f, .75f});
+      }
     }
   });
 
 
   auto query = map.query_gps();
   vec2 last_mouse_pos{};
+  float angle{};
+  vec2 dir{};
   render.start_loop(60u, ntf::overload{
     // Update call
     [&](uint32 ups) {
       const float dt = 1/static_cast<float>(ups);
       auto cam_pos = render.cam_pos();
-      auto& cino = objs.back();
+      // auto& cino = objs.back();
       const auto mouse_world = render.raycast(mouse_pos.x, -mouse_pos.y);
       sdf.set_pos(mouse_world);
 
       const auto mouse_delta = (mouse_pos - last_mouse_pos)*dt;
 
-      const auto dir = glm::normalize(cino.transform.pos()-sdf.pos());
-      const vec2 up{0.f, 1.f};
 
-      float angle = glm::acos(glm::dot(dir, up));
-      if (dir.x >= 0.f){
-        angle *= -1.f;
-      }
-      sdf3.set_pos(mouse_world + dir*100.f);
-      sdf3.set_rot(angle+M_PIf);
-      sdf4.set_pos(mouse_world + dir*70.f);
-      sdf4.set_rot(angle+M_PIf);
       // cino.transform.pos(mouse_world + dir*100.f);
       // cino.transform.rot(0.f, 0.f, angle);
 
@@ -135,10 +140,26 @@ int main(int argc, const char* argv[]) {
         render.cam_pos(cam_pos.x, cam_pos.y);
       }
 
-      if (ntf::collision2d(render.raycast(mouse_pos.x, -mouse_pos.y), 5.f, {1280, -1280}, 50.f)) {
-        sdf2.set_outline_width(10.f);
-      } else {
-        sdf2.set_outline_width(0.f);
+      if (!checkpoints.empty()) {
+        auto& obj = checkpoints[selected];
+        if (!ntf::collision2d(mouse_world, 5.f, obj.pos(), obj.size())) {
+          obj.set_outline_width(2.f);
+        } else {
+          selected = (selected+1u)% checkpoints.size();
+          obj.set_outline_width(0.f);
+        }
+        // logger::debug("{}", selected);
+        dir = glm::normalize(obj.pos()-sdf.pos());
+        const vec2 up{0.f, 1.f};
+
+        angle = glm::acos(glm::dot(dir, up));
+        if (dir.x >= 0.f){
+          angle *= -1.f;
+        }
+        sdf3.set_pos(mouse_world + dir*25.f);
+        sdf3.set_rot(angle+M_PIf);
+        sdf4.set_pos(mouse_world + dir*15.f);
+        sdf4.set_rot(angle+M_PIf);
       }
 
       last_mouse_pos = mouse_pos;
@@ -148,23 +169,38 @@ int main(int argc, const char* argv[]) {
     [&]([[maybe_unused]] double dt, [[maybe_unused]] double alpha) {
       render.start_render();
 
-      auto& cino = objs.back().transform;
-      auto cam_pos = render.cam_pos();
-      render.render_string(100.f, 500.f, 1.f, query.info);
-      render.render_text(100.f, 150.f, 1.f, "~ze");
-      render.render_text(100.f, 200.f, 1.f, "map_pos {},{}", cam_pos.x, cam_pos.y);
-      render.render_text(100.f, 250.f, 1.f, "cino_coord {:.7f},{:.7f}",
-                         cino_coord.x, cino_coord.y);
-      render.render_text(100.f, 300.f, 1.f, "cino_pos {:.2f},{:.2f}", cino.pos_x(), cino.pos_y());
+      // auto& cino = objs.back().transform;
+      auto cam_pos = tileset.coord_from_pos(render.cam_pos());
+      auto ppos = tileset.coord_from_pos(sdf.pos());
+      render.render_text(20.f, 200.f, 1.f, "pos {:.7f} {:.7f}",
+                         ppos.x, ppos.y);
+      // render.render_string(20.f, 600.f, 1.f, query.info);
+      // render.render_text(100.f, 100.f, 1.f, "~ze");
+      render.render_text(20.f, 150.f, 1.f, "map_pos {:.7f},{:.7f}", cam_pos.x, cam_pos.y);
+      // render.render_text(100.f, 250.f, 1.f, "cino_coord {:.7f},{:.7f}",
+      //                    cino_coord.x, cino_coord.y);
+      // render.render_text(100.f, 300.f, 1.f, "cino_pos {:.2f},{:.2f}", cino.pos_x(), cino.pos_y());
       for (auto& obj : objs) {
         render.render_texture(obj.tex, obj.transform.world());
       }
-      render.render_thing(sdf2);
+      for (auto& check : checkpoints) {
+        render.render_thing(check);
+      }
       render.render_thing(sdf);
-      render.render_thing(sdf4);
-      render.render_thing(sdf3);
-      render.render_text(mouse_pos.x-180.f, 50.f+mouse_pos.y+render.viewport().y, 1.f,
-                         "BAKA DETECTED");
+      if (!checkpoints.empty()) {{
+        auto pos = tileset.coord_from_pos(checkpoints[selected].pos());
+        render.render_text(20.f, 100.f, 1.f, "check_pos {:.7f},{:.7f}",
+                           pos.x, pos.y);
+        render.render_text(20.f, 50.f, 1.f, "angle {:.2f},{:.2f} ({:.2f} deg)",
+                           dir.x, dir.y, glm::degrees(angle+M_PIf));
+        render.render_thing(sdf4);
+        render.render_thing(sdf3);
+      }}
+
+      // render.render_thing(sdf2);
+
+      // render.render_text(mouse_pos.x-180.f, 50.f+mouse_pos.y+render.viewport().y, 1.f,
+      //                    "BAKA DETECTED");
       // render.render_thing(bez);
 
       render.end_render();

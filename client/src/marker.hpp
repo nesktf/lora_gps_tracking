@@ -2,7 +2,7 @@
 
 #include "./renderer.hpp"
 
-class gps_marker : public ntf::rendering_rule {
+class gps_marker final : public ntf::rendering_rule {
 private:
   gps_marker(pipeline_t pipeline, float point_rad, float pres_rad) noexcept;
 
@@ -18,6 +18,7 @@ public:
 
 public:
   vec2 pos() const { return _pos; }
+  float size() const { return _point_rad; }
 
 private:
   pipeline_t _pipeline;
@@ -25,7 +26,7 @@ private:
   vec2 _pos;
 };
 
-class map_shape : public ntf::rendering_rule {
+class map_shape final : public ntf::rendering_rule {
 public:
   enum shape_enum {
     S_CIRCLE,
@@ -54,6 +55,7 @@ public:
 
 public:
   vec2 pos() const { return _pos; }
+  float size() const { return _radius; }
 
 private:
   pipeline_t _pipeline;
