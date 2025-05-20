@@ -6,6 +6,7 @@
 #include <shogle/math.hpp>
 #include <shogle/version.hpp>
 #include <shogle/stl.hpp>
+#include <shogle/boilerplate.hpp>
 
 using logger = ntf::logger;
 using ntf::uint32;
