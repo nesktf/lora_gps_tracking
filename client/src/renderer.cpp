@@ -20,14 +20,16 @@ render_ctx::render_ctx(ntf::renderer_window&& win, ntf::renderer_context&& rende
   _quad{std::move(quad)}, _tile_pipeline{std::move(quad_pipeline)},
   _frenderer{std::move(frenderer)}, _frule{std::move(frule)},
   _vp{viewport}, _proj{proj}, _inv_proj{glm::inverse(proj)},
-  _cam_pos{0.f, 0.f}, _cam_origin{(float)viewport.x / 2.f, (float)viewport.y / 2.f},
-  _uniform_offset{0u} {_gen_view();}
+  _cam_pos{0.f, 0.f}, _cam_origin{(float)viewport.x / 2.f, (float)viewport.y / 2.f}
+{
+  _gen_view();
+}
 
 render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_view tile_frag_src,
                                   ntf::font_atlas_data&& font_atlas, ntf::extent2d win_sz) {
   const ntf::win_gl_params gl_param {
     .ver_major = 4,
-    .ver_minor = 3,
+    .ver_minor = 6,
   };
   auto win = ntf::renderer_window::create({
     .width = win_sz.x,
@@ -66,19 +68,16 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
     .source = {tile_frag_src},
   }).value();
 
-  const auto attr_desc = ntf::quad_mesh::attr_descriptor();
+  const auto attributes = ntf::quad_mesh::attribute_binding();
   const ntf::r_blend_opts blending {
     .mode = ntf::r_blend_mode::add,
     .src_factor = ntf::r_blend_factor::src_alpha,
     .dst_factor = ntf::r_blend_factor::inv_src_alpha,
     .color = {0.f, 0.f, 0.f, 0.f},
-    .dynamic = false,
   };
   ntf::r_shader stages[] {vert.handle(), frag.handle()};
   auto pip = ntf::renderer_pipeline::create(*rctx, {
-    .attrib_binding = 0u,
-    .attrib_stride = sizeof(ntf::quad_mesh::attr_type),
-    .attribs = attr_desc,
+    .attributes = attributes,
     .stages = stages,
     .primitive = ntf::r_primitive::triangles,
     .poly_mode = ntf::r_polygon_mode::fill,
@@ -90,11 +89,11 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
     .blending = blending,
   }).value();
 
-  auto frenderer = ntf::font_renderer::create(*rctx, std::move(font_atlas)).value();
+  ntf::mat4 proj_mat = glm::ortho(0.f, (float)win_sz.x, 0.f, (float)win_sz.y);
+  auto frenderer = ntf::font_renderer::create(*rctx, proj_mat, std::move(font_atlas)).value();
 
   vec2 cam_origin {win_sz.x*.5f, win_sz.y*.5f};
-  ntf::mat4 proj_mat = glm::ortho(0.f, (float)win_sz.x, 0.f, (float)win_sz.y);
-  auto sdf_rule = ntf::sdf_text_rule::create(*rctx, proj_mat,
+  auto sdf_rule = ntf::sdf_text_rule::create(*rctx,
                                              ntf::color3{.9f, .9f, .9f}, 0.5f, 0.05f,
                                              ntf::color3{0.f, 0.f, 0.f},
                                              // ntf::vec2{-0.005f, -0.005f},
@@ -109,8 +108,6 @@ render_ctx& render_ctx::construct(std::string_view tile_vert_src, std::string_vi
 
 void render_ctx::start_render() {
   _text_buff.clear();
-  _uniform_cache.clear();
-  _uniform_offset = 0u;
 }
 
 void render_ctx::end_render() {
@@ -136,34 +133,27 @@ size_t render_ctx::make_texture(const ntf::image_data& image) {
   return _texs.size()-1;
 }
 
-void render_ctx::render_texture(size_t tex, const ntf::mat4& transf) {
+void render_ctx::render_texture(size_t tex, const ntf::mat4& transf, uint32 sort) {
   auto fbo = ntf::renderer_framebuffer::default_fbo(_ctx);
-  const int sampler = 0;
   const ntf::r_push_constant unifs[] = {
     ntf::r_format_pushconst(*_tile_pipeline.uniform("u_model"), transf),
     ntf::r_format_pushconst(*_tile_pipeline.uniform("u_proj"), _proj),
     ntf::r_format_pushconst(*_tile_pipeline.uniform("u_view"), _view),
-    ntf::r_format_pushconst(*_tile_pipeline.uniform("u_sampler"), sampler),
+    ntf::r_format_pushconst(*_tile_pipeline.uniform("u_sampler"), 0),
   };
-  const ntf::r_buffer_binding bbinds[] = {
-    {.buffer = _quad.vbo().handle(), .type = ntf::r_buffer_type::vertex, .location = {}},
-    {.buffer = _quad.ebo().handle(), .type = ntf::r_buffer_type::index, .location = {}},
-  };
-  const ntf::r_texture_binding tbinds[] = {
-    {.texture = _texs[tex].handle(), .location = sampler},
-  };
+  auto tex_binding = _texs[tex].handle();
   _ctx.submit_command({
     .target = fbo.handle(),
     .pipeline = _tile_pipeline.handle(),
-    .buffers = bbinds,
-    .textures = tbinds,
+    .buffers = _quad.bindings(),
+    .textures = {tex_binding},
     .uniforms = unifs,
     .draw_opts = {
       .count = 6,
       .offset = 0,
       .instances = 0,
-      .sort_group = 0
     },
+    .sort_group = sort,
     .on_render = {},
   });
 }
@@ -177,7 +167,7 @@ void render_ctx::update_viewport(ntf::uint32 w, ntf::uint32 h) {
   _cam_origin.x = w*.5f;
   _cam_origin.y = h*.5f;
   _gen_view();
-  _frule.transform(_proj);
+  _frenderer.set_transform(_proj);
 }
 
 void render_ctx::_gen_view() {
@@ -208,15 +198,12 @@ pipeline_t render_ctx::make_pipeline(std::string_view vert_src, std::string_view
     .src_factor = ntf::r_blend_factor::src_alpha,
     .dst_factor = ntf::r_blend_factor::inv_src_alpha,
     .color = {0.f, 0.f, 0.f, 0.f},
-    .dynamic = false,
   };
 
-  const auto attr_desc = ntf::quad_mesh::attr_descriptor();
+  const auto attributes = ntf::quad_mesh::attribute_binding();
   const ntf::r_shader stages[] {vert.handle(), frag.handle()};
   _pips.emplace_back(ntf::renderer_pipeline::create(_ctx, {
-    .attrib_binding = 0u,
-    .attrib_stride = sizeof(ntf::quad_mesh::attr_type),
-    .attribs = attr_desc,
+    .attributes = attributes,
     .stages = stages,
     .primitive = ntf::r_primitive::triangles,
     .poly_mode = ntf::r_polygon_mode::fill,
@@ -231,30 +218,40 @@ pipeline_t render_ctx::make_pipeline(std::string_view vert_src, std::string_view
   return _pips.size()-1u;
 }
 
-void render_ctx::render_thing(ntf::rendering_rule& rule) {
-  auto fbo = ntf::renderer_framebuffer::default_fbo(_ctx);
-  const size_t last_sz = _uniform_cache.size();
-  const auto pip = rule.retrieve_uniforms(_uniform_cache);
-  const size_t uniform_count = (_uniform_cache.size()-last_sz);
-  NTF_ASSERT(uniform_count);
+buffer_t render_ctx::make_buffer(size_t size) {
+  _buffs.emplace_back(ntf::renderer_buffer::create(_ctx, {
+    .type = ntf::r_buffer_type::uniform,
+    .flags = ntf::r_buffer_flag::dynamic_storage,
+    .size = size,
+    .data = nullptr,
+  }).value());
 
-  const ntf::r_buffer_binding bbinds[] = {
-    {.buffer = _quad.vbo().handle(), .type = ntf::r_buffer_type::vertex, .location = {}},
-    {.buffer = _quad.ebo().handle(), .type = ntf::r_buffer_type::index, .location = {}},
+  return _buffs.size()-1u;
+}
+
+void render_ctx::render_thing(rendering_rule& rule, uint32 sort) {
+  auto fbo = ntf::renderer_framebuffer::default_fbo(_ctx);
+  auto [pip, buff] = rule.write_uniforms();
+  NTF_ASSERT(buff < _buffs.size());
+  NTF_ASSERT(pip < _pips.size());
+  const ntf::r_shader_buffer unif_buff {
+    .buffer = _buffs[buff].handle(),
+    .binding = 1u,
+    .offset = 0u,
+    .size = _buffs[buff].size(),
   };
   _ctx.submit_command({
     .target = fbo.handle(),
-    .pipeline = pip,
-    .buffers = bbinds,
+    .pipeline = _pips[pip].handle(),
+    .buffers = _quad.bindings({unif_buff}),
     .textures = {},
-    .uniforms = {_uniform_cache.data()+_uniform_offset, uniform_count},
+    .uniforms = {},
     .draw_opts = {
       .count = 6,
       .offset = 0,
       .instances = 0,
-      .sort_group = 0
     },
+    .sort_group = sort,
     .on_render = {},
   });
-  _uniform_offset = _uniform_offset + uniform_count;
 }

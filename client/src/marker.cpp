@@ -1,46 +1,46 @@
 #include "./marker.hpp"
 
-#define SET_UNIFORM(name, var) \
-  list.emplace_back(ntf::r_format_pushconst(*pip.uniform(name), var))
-
-gps_marker::gps_marker(pipeline_t handle, float point_rad, float pres_rad) noexcept :
-  _pipeline{handle},
+gps_marker::gps_marker(pipeline_t handle, buffer_t uniform_buffer,
+                       float point_rad, float pres_rad) noexcept :
+  _pipeline{handle}, _uniform_buffer{uniform_buffer},
   _point_rad{point_rad}, _pres_rad{pres_rad},
   _pos{0.f, 0.f} {}
 
-ntf::r_pipeline gps_marker::retrieve_uniforms(ntf::uniform_list& list) {
-  const auto pip = render_ctx::instance().get_pipeline(_pipeline);
-  const auto& view = render_ctx::instance().get_view();
-
-  SET_UNIFORM("u_point_rad", _point_rad);
-  SET_UNIFORM("u_pres_rad", _pres_rad);
-  SET_UNIFORM("u_pos", _pos);
-  SET_UNIFORM("u_view", view);
-
-  return pip.handle();
+std::pair<pipeline_t, buffer_t> gps_marker::write_uniforms() {
+  auto& r = render_ctx::instance();
+  const auto buff = r.get_buffer(_uniform_buffer); 
+  const shader_data data {
+    .view = r.get_view(),
+    .pos = _pos,
+    .point_rad = _point_rad,
+    .pres_rad = _pres_rad,
+  };
+  buff.upload(0u, sizeof(shader_data), &data);
+  return std::make_pair(_pipeline, _uniform_buffer);
 }
 
-map_shape::map_shape(pipeline_t pipeline, const color4& color,
+map_shape::map_shape(pipeline_t pipeline, buffer_t uniform_buffer, const color4& color,
                      float nsides, float radius, float rot) noexcept :
-  _pipeline{pipeline},
+  _pipeline{pipeline}, _uniform_buffer{uniform_buffer},
   _color{color}, _color_out{0.f, 0.f, 0.f, 1.f},
   _nsides{nsides}, _radius{radius}, _rot{rot}, _out_width{0.f},
   _pos{0.f, 0.f} {}
 
-ntf::r_pipeline map_shape::retrieve_uniforms(ntf::uniform_list& list) {
-  const auto pip = render_ctx::instance().get_pipeline(_pipeline);
-  const auto& view = render_ctx::instance().get_view();
-
-  SET_UNIFORM("u_nsides", _nsides);
-  SET_UNIFORM("u_radius", _radius);
-  SET_UNIFORM("u_rot", _rot);
-  SET_UNIFORM("u_color", _color);
-  SET_UNIFORM("u_out_width", _out_width);
-  SET_UNIFORM("u_out_color", _color_out);
-  SET_UNIFORM("u_pos", _pos);
-  SET_UNIFORM("u_view", view);
-
-  return pip.handle();
+std::pair<pipeline_t, buffer_t> map_shape::write_uniforms() {
+  auto& r = render_ctx::instance();
+  const auto buff = r.get_buffer(_uniform_buffer); 
+  const shader_data data {
+    .view = r.get_view(),
+    .color = _color,
+    .out_color = _color_out,
+    .pos = _pos,
+    .radius = _radius,
+    .rot = _rot,
+    .out_width = _out_width,
+    .nsides = _nsides,
+  };
+  buff.upload(0u, sizeof(shader_data), &data);
+  return std::make_pair(_pipeline, _uniform_buffer);
 }
 
 static constexpr std::string_view frag_gps_marker = R"glsl(
@@ -48,10 +48,12 @@ static constexpr std::string_view frag_gps_marker = R"glsl(
 
 out vec4 frag_color;
 
-uniform float u_point_rad;
-uniform float u_pres_rad;
-uniform vec2 u_pos;
-uniform mat4 u_view;
+layout (std140, binding = 1) uniform frag_data {
+  mat4 u_view;
+  vec2 u_pos;
+  float u_point_rad;
+  float u_pres_rad;
+};
 
 const vec4 point_color = vec4(.164f, .715f, .965f, 1.f);
 const vec4 point_outline_color = vec4(.1f, .1f, .1f, 1.f);
@@ -107,16 +109,16 @@ static constexpr std::string_view frag_shape = R"glsl(
 
 out vec4 frag_color;
 
-uniform float u_nsides;
-uniform float u_radius;
-uniform float u_rot;
-uniform vec4 u_color;
-
-uniform float u_out_width;
-uniform vec4 u_out_color;
-
-uniform vec2 u_pos;
-uniform mat4 u_view;
+layout (std140, binding = 1) uniform frag_data {
+  mat4 u_view;
+  vec4 u_color;
+  vec4 u_out_color;
+  vec2 u_pos;
+  float u_radius;
+  float u_rot;
+  float u_out_width;
+  float u_nsides;
+};
 
 float circle_dist(vec2 p, float radius) {
 	return length(p) - radius;
@@ -162,32 +164,36 @@ void main() {
 )glsl";
 
 gps_marker gps_marker::make_marker(float size, float radius) {
-  auto pip = render_ctx::instance().make_pipeline(vert_frag_only_src, frag_gps_marker);
-  return gps_marker{pip, size, radius};
+  auto& r = render_ctx::instance();
+  auto pip = r.make_pipeline(vert_frag_only_src, frag_gps_marker);
+  auto buff = r.make_buffer(sizeof(shader_data));
+  return gps_marker{pip, buff, size, radius};
 }
 
 map_shape map_shape::make_shape(shape_enum shape, float size, const color4& color)
 {
-  auto pip = render_ctx::instance().make_pipeline(vert_frag_only_src, frag_shape);
+  auto& r = render_ctx::instance();
+  auto pip = r.make_pipeline(vert_frag_only_src, frag_shape);
+  auto buff = r.make_buffer(sizeof(shader_data));
   switch (shape) {
     case shape_enum::S_CIRCLE: {
-      return map_shape{pip, color, 0.f, size, 0.f};
+      return map_shape{pip, buff, color, 0.f, size, 0.f};
       break;
     }
     case shape_enum::S_TRIANGLE: {
-      return map_shape{pip, color, 3.f, size, M_PIf};
+      return map_shape{pip, buff, color, 3.f, size, M_PIf};
       break;
     }
     case shape_enum::S_SQUARE: {
-      return map_shape{pip, color, 4.f, size, 0.f};
+      return map_shape{pip, buff, color, 4.f, size, 0.f};
       break;
     }
     case shape_enum::S_DIAMOND: {
-      return map_shape{pip, color, 4.f, size, M_PIf*.25f};
+      return map_shape{pip, buff, color, 4.f, size, M_PIf*.25f};
       break;
     }
     case shape_enum::S_PENTAGON: {
-      return map_shape{pip, color, 5.f, size, M_PIf};
+      return map_shape{pip, buff, color, 5.f, size, M_PIf};
       break;
     }
   }

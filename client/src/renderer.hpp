@@ -17,8 +17,14 @@ using ntf::vec2;
 using ntf::color4;
 
 using pipeline_t = size_t;
+using buffer_t = size_t;
 
 extern std::string_view vert_frag_only_src;
+
+struct rendering_rule {
+  virtual ~rendering_rule() = default;
+  virtual std::pair<pipeline_t, buffer_t> write_uniforms() = 0;
+};
 
 class render_ctx : public ntf::singleton<render_ctx> {
 private:
@@ -34,7 +40,8 @@ public:
 public:
   size_t make_texture(const ntf::image_data& image);
   pipeline_t make_pipeline(std::string_view vert, std::string_view frag);
-  void render_texture(size_t tex, const ntf::mat4& transf);
+  buffer_t make_buffer(size_t size);
+  void render_texture(size_t tex, const ntf::mat4& transf, uint32 sort = 0u);
   void update_viewport(ntf::uint32 w, ntf::uint32 h);
   vec2 viewport() const { return _vp; }
 
@@ -48,7 +55,7 @@ public:
   vec2 raycast(float x, float y) const;
 
 public:
-  void render_thing(ntf::rendering_rule& rule);
+  void render_thing(rendering_rule& rule, uint32 sort = 0u);
 
   void start_render();
   void end_render();
@@ -80,6 +87,7 @@ public:
   const ntf::mat4& get_proj() const { return _proj; }
   const ntf::mat4& get_view() const { return _view; }
   ntf::r_pipeline_view get_pipeline(pipeline_t idx) const { return _pips[idx].handle(); } 
+  ntf::r_buffer_view get_buffer(buffer_t idx) const { return _buffs[idx].handle(); }
 
 private:
   ntf::renderer_window _win;
@@ -97,8 +105,7 @@ private:
   ntf::text_buffer _text_buff;
   std::vector<ntf::renderer_texture> _texs;
   std::vector<ntf::renderer_pipeline> _pips;
-  ntf::uniform_list _uniform_cache;
-  size_t _uniform_offset;
+  std::vector<ntf::renderer_buffer> _buffs;
 
 private:
   friend ntf::singleton<render_ctx>;

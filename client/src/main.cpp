@@ -184,7 +184,7 @@ int main(int argc, const char* argv[]) {
         render.render_texture(obj.tex, obj.transform.world());
       }
       for (auto& check : checkpoints) {
-        render.render_thing(check);
+        render.render_thing(check, 1u);
       }
       render.render_thing(sdf);
       if (!checkpoints.empty()) {{
